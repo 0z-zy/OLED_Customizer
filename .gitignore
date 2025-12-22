@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.spec
+.env
+venv/
+.idea/
+.vscode/
+
+# Build artifacts
+dist/
+build/
+*.exe
+
+# Except the main Launcher
+!Launcher.exe
+
+# User specific
+config.json
+credentials.json
+yt_nowplaying.json
+cert.pem
+key.pem
+.lock

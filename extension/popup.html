@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+        body {
+            width: 200px;
+            background: #1f1f1f;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .header {
+            font-size: 16px;
+            font-weight: bold;
+            color: #00ff00;
+            margin-bottom: 10px;
+        }
+
+        .status {
+            font-size: 12px;
+            color: #aaaaaa;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            background: #333;
+            border: none;
+            color: white;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.3s;
+        }
+
+        .btn:hover {
+            background: #444;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">OLED Customizer</div>
+    <div class="status">Browser Sync Active</div>
+    <div style="font-size: 10px; color: #666; margin-bottom: 15px;">Sending precision media data to your keyboard.</div>
+    <button class="btn" id="github-btn">Project GitHub</button>
+    <script src="popup.js"></script>
+</body>
+
+</html>
