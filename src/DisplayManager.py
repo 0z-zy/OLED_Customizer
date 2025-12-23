@@ -54,7 +54,14 @@ class DisplayManager:
         run_systray_async(self)
 
         self.player = SpotifyPlayer(config, self.user_preferences, fps)
-        self.spotify_api = SpotifyAPI(self.user_preferences)
+        
+        # Only initialize Spotify API if enabled in preferences
+        self.spotify_enabled = self.user_preferences.get_preference("spotify_enabled")
+        if self.spotify_enabled:
+            self.spotify_api = SpotifyAPI(self.user_preferences)
+        else:
+            self.spotify_api = None
+        
         self.steelseries_api = SteelSeriesAPI()
 
         self.volume_overlay = VolumeOverlay(config)
@@ -168,8 +175,8 @@ class DisplayManager:
 
         self._spotify_poll_ms = max(250, int(self.fetch_delay * 1000))
         
-        # Reload Spotify credentials if they changed
-        if hasattr(self, "spotify_api"):
+        # Reload Spotify credentials if they changed (only if Spotify is enabled)
+        if hasattr(self, "spotify_api") and self.spotify_api:
             changed = self.spotify_api.reload_config()
             # If credentials changed, force a re-fetch with prompt
             if changed:
@@ -205,7 +212,10 @@ class DisplayManager:
             return None
 
     def init(self):
-        # Startup: try to load token, but DO NOT open browser automatically (prompt_user=False)
+        # Startup: Only attempt Spotify auth if enabled
+        if not self.spotify_enabled or not self.spotify_api:
+            return
+            
         # Run in thread to not block startup logic
         def startup_auth():
              self.spotify_api.fetch_token(prompt_user=True)
@@ -315,8 +325,8 @@ class DisplayManager:
                         # No media from extension or SMTC
                         pass
 
-            # 2) Spotify poll (normal)
-            if now_ms - self._last_spotify_poll_ms >= self._spotify_poll_ms:
+            # 2) Spotify poll (normal) - only if Spotify is enabled
+            if self.spotify_api and now_ms - self._last_spotify_poll_ms >= self._spotify_poll_ms:
                 self._last_spotify_poll_ms = now_ms
                 Thread(
                     target=self._poll_spotify,

@@ -261,6 +261,7 @@ class SettingsGUI:
         self.vars["display_player"] = tk.BooleanVar(value=bool(self.prefs.get_preference("display_player")))
         self.vars["display_hw_monitor"] = tk.BooleanVar(value=bool(self.prefs.get_preference("display_hw_monitor")))
         # Spotify
+        self.vars["spotify_enabled"] = tk.BooleanVar(value=bool(self.prefs.get_preference("spotify_enabled")))
         self.vars["spotify_client_id"] = tk.StringVar(value=self.prefs.get_preference("spotify_client_id") or "")
         self.vars["spotify_client_secret"] = tk.StringVar(value=self.prefs.get_preference("spotify_client_secret") or "")
         self.vars["spotify_redirect_uri"] = tk.StringVar(value=self.prefs.get_preference("spotify_redirect_uri") or "")
@@ -296,6 +297,7 @@ class SettingsGUI:
         # -- SPOTIFY PAGE --
         p_spotify = tk.Frame(self.content_area, bg=Colors.CONTENT)
         self._header(p_spotify, "🎵 Spotify Configuration")
+        self._toggle_row(p_spotify, "Enable Spotify Integration", self.vars["spotify_enabled"])
         self._entry_row(p_spotify, "Spotify Client ID", self.vars["spotify_client_id"], width=25)
         self._entry_row(p_spotify, "Spotify Client Secret", self.vars["spotify_client_secret"], width=25, show="*")
         self._entry_row(p_spotify, "Redirect URI", self.vars["spotify_redirect_uri"], width=25)

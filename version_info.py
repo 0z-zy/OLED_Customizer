@@ -6,8 +6,8 @@ VSVersionInfo(
   ffi=FixedFileInfo(
     # filevers and prodvers should be always a tuple with four items: (1, 2, 3, 4)
     # Set not needed items to zero 0.
-    filevers=(1, 2, 13, 0),
-    prodvers=(1, 2, 13, 0),
+    filevers=(1, 2, 14, 0),
+    prodvers=(1, 2, 14, 0),
     # Contains a bitmask that specifies the valid bits 'flags'r
     mask=0x3f,
     # Contains a bitmask that specifies the Boolean attributes of the file.
@@ -31,9 +31,9 @@ VSVersionInfo(
         '040904B0',
         [StringStruct('CompanyName', 'Ozzy'),
         StringStruct('FileDescription', 'OLED Customizer'),
-        StringStruct('FileVersion', '1.2.13.0'),
+        StringStruct('FileVersion', '1.2.14.0'),
         StringStruct('ProductName', 'OLED Customizer'),
-        StringStruct('ProductVersion', '1.2.13.0'),
+        StringStruct('ProductVersion', '1.2.14.0'),
         StringStruct('LegalCopyright', 'Ozzy')])
       ]), 
     VarFileInfo([VarStruct('Translation', [1033, 1200])])

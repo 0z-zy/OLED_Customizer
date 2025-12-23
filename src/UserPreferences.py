@@ -10,6 +10,7 @@ logger = logging.getLogger("OLED Customizer")
 
 class UserPreferences:
     DEFAULT = {
+        "spotify_enabled": False,
         "spotify_client_id": "",
         "spotify_client_secret": "",
         "spotify_redirect_uri": "",
