@@ -481,15 +481,6 @@ class SettingsGUI:
                 )
                 self.root.destroy()
                 return
-
-                # Restart Application
-                import sys
-                import subprocess
-                import os
-                
-                # Wait 1s and restart
-                # subprocess.Popen(f'cmd /c "timeout /t 1 && start "" "{sys.executable}"', shell=True)
-                # os._exit(0)
             else:
                 tk.messagebox.showinfo("Success", "Settings saved!")
 
