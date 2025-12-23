@@ -38,7 +38,43 @@ class SpotifyAPI:
         self.session = Session()
         self._auth_lock = __import__('threading').Lock()
 
-    # ... (skipping unchanged code until fetch_token) ...
+    def _check_configuration(self):
+        if not all([self.client_id, self.client_secret, self.redirect_uri, self.port]):
+            logger.error(f"Configuration not completed for Spotify API, check configuration file : {self.config.config_path}")
+            return False
+        return True
+
+    def reload_config(self):
+        """Called when settings are saved to reload credentials without restart."""
+        old_id = self.client_id
+        old_secret = self.client_secret
+        old_redirect = self.redirect_uri
+        old_port = self.port
+
+        self.client_id = str(self.config.get_preference('spotify_client_id')).strip()
+        self.client_secret = str(self.config.get_preference('spotify_client_secret')).strip()
+        self.redirect_uri = str(self.config.get_preference('spotify_redirect_uri')).strip()
+        self.port = int(self.config.get_preference('local_port'))
+        
+        self.ready = self._check_configuration()
+        
+        changed = (old_id != self.client_id) or \
+                  (old_secret != self.client_secret) or \
+                  (old_redirect != self.redirect_uri) or \
+                  (old_port != self.port)
+
+        if changed:
+            logger.info("Spotify credentials reloaded from config (CHANGED).")
+            # Invalidate old token file because it likely belongs to the old credentials
+            try:
+                os.remove(fetch_app_data_path("credentials.json"))
+                logger.info("Old credentials.json deleted to force re-auth.")
+            except OSError:
+                pass
+            return True
+        else:
+            logger.info("Spotify credentials reloaded (NO CHANGE).")
+            return False
 
     def fetch_token(self, prompt_user=True):
         if not self.ready:
