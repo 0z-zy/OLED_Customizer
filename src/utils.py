@@ -11,7 +11,13 @@ def fetch_app_data_path(content=''):
     return path.abspath(getenv('APPDATA') + '/OLED Customizer/' + content)
 
 def fetch_content_path(content):
-    return path.abspath(path.join(path.dirname(path.abspath(__file__)), '../', content))
+    if getattr(sys, 'frozen', False):
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    else:
+        base_path = path.join(path.dirname(path.abspath(__file__)), '../')
+    
+    return path.abspath(path.join(base_path, content))
 
 def set_startup(enable: bool):
     """

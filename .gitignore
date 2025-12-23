@@ -12,8 +12,9 @@ dist/
 build/
 *.exe
 
-# Except the main Launcher
-!Launcher.exe
+# Except the main executable
+!OLED-Customizer.exe
+!OLED-Customizer.spec
 
 # User specific
 config.json
