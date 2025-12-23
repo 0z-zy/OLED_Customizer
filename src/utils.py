@@ -19,6 +19,27 @@ def fetch_content_path(content):
     
     return path.abspath(path.join(base_path, content))
 
+def normalize_text(text: str) -> str:
+    """
+    Replaces Turkish characters with their ASCII equivalents to prevent rendering issues on the OLED.
+    """
+    if not text:
+        return ""
+        
+    replacements = {
+        "ş": "s", "Ş": "S",
+        "ç": "c", "Ç": "C",
+        "ü": "u", "Ü": "U",
+        "ö": "o", "Ö": "O",
+        "ğ": "g", "Ğ": "G",
+        "ı": "i", "İ": "I",
+    }
+    
+    for turkey_char, ascii_char in replacements.items():
+        text = text.replace(turkey_char, ascii_char)
+        
+    return text
+
 def set_startup(enable: bool):
     """
     Add or remove the application from Windows Startup via Registry.

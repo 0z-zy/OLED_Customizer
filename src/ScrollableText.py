@@ -1,5 +1,7 @@
 
 
+from src.utils import normalize_text
+
 class ScrollableText:
 
     def __init__(self, config, font, content="", pos_y=0):
@@ -38,7 +40,7 @@ class ScrollableText:
         if font is not None:
             self.font = font
 
-        self.content = content
+        self.content = normalize_text(content)
         self.steps_calculated = False
 
     def draw_next_step(self, draw):

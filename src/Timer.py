@@ -3,6 +3,7 @@ from time import localtime, strftime
 import math
 
 from src.image_utils import fetch_content_path
+from src.utils import normalize_text
 
 
 class Timer:
@@ -165,7 +166,7 @@ class Timer:
         
         date_text = f"{day_str} {strftime('%d/%m/%Y', current_time)}"
 
-        return time_text, date_text
+        return time_text, normalize_text(date_text)
 
     def set_display_seconds(self, display_seconds):
         self.display_seconds = display_seconds
