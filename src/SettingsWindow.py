@@ -473,7 +473,8 @@ class SettingsGUI:
                     "Spotify settings changed. Please restart the application manually."
                 )
                 self.root.destroy()
-                
+                return
+
                 # Restart Application
                 import sys
                 import subprocess
