@@ -14,13 +14,28 @@ added_files = [
 ]
 
 # Recursively add everything in 'content' folder
-for root, dirs, files in os.walk('content'):
+content_path = os.path.abspath('content')
+print(f"Collecting assets from: {content_path}")
+
+if not os.path.exists(content_path):
+    print("WARNING: 'content' directory NOT found!")
+
+for root, dirs, files in os.walk(content_path):
     for filename in files:
         if filename.endswith(".py") or filename.endswith(".pyc"): continue
+        
         file_path = os.path.join(root, filename)
-        # Target path inside bundle (preserve structure)
-        # e.g. content/fonts/MunroSmall.ttf -> content/fonts
-        target_dir = root.replace("\\", "/") 
+        
+        # Calculate relative path from content root to keep structure
+        # e.g. C:\...\content\fonts\Munro.ttf -> fonts
+        rel_dir = os.path.relpath(root, content_path)
+        
+        if rel_dir == ".":
+            target_dir = "content"
+        else:
+            target_dir = os.path.join("content", rel_dir)
+            
+        print(f"Adding {filename} -> {target_dir}")
         added_files.append((file_path, target_dir))
 
 a = Analysis(
