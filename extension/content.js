@@ -51,7 +51,7 @@ async function sendData() {
 
     if (dataString !== lastDataString || !lastSentData || playingChanged || (Math.abs(data.progress - lastSentData.progress) >= 2)) {
         try {
-            await fetch('http://127.0.0.1:2408/extension_data', {
+            await fetch('http://127.0.0.1:8888/extension_data', {
                 method: 'POST',
                 mode: 'no-cors',
                 headers: { 'Content-Type': 'application/json' },

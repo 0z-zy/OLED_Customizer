@@ -1,6 +1,6 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlencode, urlparse, parse_qs
-from requests import Session  # Get/Post yerine Session kullanacağız
+from requests import Session
 from base64 import b64encode
 from time import time
 from json import loads, dumps
@@ -10,47 +10,23 @@ import ctypes
 import webbrowser
 import logging
 import sys
+import os
+import socket
 
 from src.utils import fetch_app_data_path
 from src.ssl import generate_cert
 
 logger = logging.getLogger('SpotifyAPI')
 
-class RequestHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path.startswith("/callback"):
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html")
-            self.end_headers()
-
-            res = parse_qs(urlparse(self.path).query)
-            if res.get('error') is not None:
-                logger.error("An error has occurred while connecting to your spotify account")
-                sys.exit(1)
-
-            self.server.code = res['code'][0]
-            self._write("<html><body><h1>You can close this window</h1></body></html>")
-        else:
-            self.send_response(404)
-            self.send_header("Content-Type", "text/html")
-            self.end_headers()
-
-            self.server.error = "Invalid route used"
-            self._write("<html><body><h1>Invalid route used</h1></body></html>")
-
-    def _write(self, text):
-        return self.wfile.write(text.encode("utf-8"))
-
 
 class SpotifyAPI:
-    # URL'ler orijinal kodundaki gibi bırakıldı
     SPOTIFY_API_URL = "https://accounts.spotify.com"
 
     def __init__(self, config):
         self.config = config
-        self.client_id = self.config.get_preference('spotify_client_id')
-        self.client_secret = self.config.get_preference('spotify_client_secret')
-        self.redirect_uri = self.config.get_preference('spotify_redirect_uri')            
+        self.client_id = str(self.config.get_preference('spotify_client_id')).strip()
+        self.client_secret = str(self.config.get_preference('spotify_client_secret')).strip()
+        self.redirect_uri = str(self.config.get_preference('spotify_redirect_uri')).strip()
         self.port = int(self.config.get_preference('local_port'))
 
         self.ready = self._check_configuration()
@@ -59,159 +35,121 @@ class SpotifyAPI:
         self.token = ""
         self.expires = -1
         
-        # HIZLANDIRMA: Oturumu başlat ve açık tut (Keep-Alive)
         self.session = Session()
+        self._auth_lock = __import__('threading').Lock()
 
-    def _check_configuration(self):
-        if not all([self.client_id, self.client_secret, self.redirect_uri, self.port]):
-            logger.error(f"Configuration not completed for Spotify API, check configuration file : {self.config.config_path}")
-            return False
-        return True
+    # ... (skipping unchanged code until fetch_token) ...
 
-    def fetch_token(self):
+    def fetch_token(self, prompt_user=True):
         if not self.ready:
             return
-        if not self.load_token():
-            url = self.SPOTIFY_API_URL + "/authorize?"
-            url += urlencode({
-                "scope": "user-read-playback-state user-read-currently-playing",
-                "response_type": "code",
-                "client_id": self.client_id,
-                "redirect_uri": self.redirect_uri
-            })
 
-            server = self.start_server()
-            webbrowser.open(url)
+        # Prevent concurrent auth attempts (spam prevention)
+        if not self._auth_lock.acquire(blocking=False):
+            logger.warning("Auth attempt skipped - already in progress")
+            return
 
-            while server.code is None and server.error is None:
-                server.handle_request()
-
-            if server.code:
-                self.retrieve_token(server.code)
-            elif server.error:
-                raise Exception(server.error)
-
-    def load_token(self):
         try:
-            with open(fetch_app_data_path("credentials.json"), "r") as f:
-                data = loads(f.readline())
+            if not self.load_token():
+                if not prompt_user:
+                    logger.info("No token found and prompt_user=False. Skipping browser auth.")
+                    return
 
-                if not data.get('refresh_token'):
-                    logger.warning("Cannot find refresh token...")
-                    return False
+                url = self.SPOTIFY_API_URL + "/authorize?"
+                url += urlencode({
+                    "scope": "user-read-playback-state user-read-currently-playing",
+                    "response_type": "code",
+                    "client_id": self.client_id,
+                    "redirect_uri": self.redirect_uri
+                })
 
-                if not data.get('token'):
-                    logger.warning("Cannot find token...")
-                    return False
+                server = self.start_server()
+                
+                if server.error: # Check for bind error immediately
+                    logger.error(f"Cannot start auth server: {server.error}")
+                    return
 
-                self.refresh_token = data['refresh_token']
-                self.token = data['token']
-                self.expires = data['expires']
-                logger.info("Use Spotify token from file")
-                return True
-        except OSError:
-            logger.warning("Could not use file to fetch Spotify token...")
-        return False
+                webbrowser.open(url)
 
-    def save_token(self):
-        try:
-            with open(fetch_app_data_path("credentials.json"), "w") as outfile:
-                outfile.write(dumps({
-                    "refresh_token": self.refresh_token,
-                    "token": self.token,
-                    "expires": self.expires
-                }, separators=(',', ':')))
+                while server.code is None and server.error is None:
+                    server.handle_request()
 
-                logger.info("Spotify token saved")
-                self.update_token_if_expired()
-        except OSError:
-            logger.warning("Could not write Spotify token in a file...")
+                if server.code:
+                    self.retrieve_token(server.code)
+                elif server.error:
+                    logger.error(f"Auth server error: {server.error}")
+                    # raise Exception(server.error) # Don't crash, just log due to thread
+        finally:
+            self._auth_lock.release()
 
-    def retrieve_token(self, code=None, refresh=False):
-        if refresh:
-            data = urlencode({
-                "client_id": self.client_id,
-                "grant_type": "refresh_token",
-                "refresh_token": self.refresh_token
-            })
-        else:
-            data = urlencode({
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": self.redirect_uri,
-            })
+    # ... (skipping unchanged code until start_server) ...
 
-        headers = {
-            "Authorization": f"Basic {b64encode((self.client_id + ':' + self.client_secret).encode()).decode()}",
-            "Content-Type": "application/x-www-form-urlencoded"
-            # Connection: Close SİLİNDİ -> Hız artışı
-        }
-
-        # Session kullanılıyor
-        req = self.session.post(
-            'https://accounts.spotify.com/api/token',
-            headers=headers,
-            data=data
-        )
-
-        data = req.json()
-
-        if data.get('refresh_token'):
-            self.refresh_token = data['refresh_token']
-        self.token = data['access_token']
-        self.expires = (time() + data["expires_in"]) * 1000
-        self.save_token()
-
-    def update_token_if_expired(self):
-        if self.expires <= int(time() * 1000):
-            self.retrieve_token(refresh=True)
-
-    def fetch_song(self):
-        if self.token == "":
-            return None
-
-        self.update_token_if_expired()
-
-        # Session kullanılıyor ve Connection: Close kaldırıldı
-        req = self.session.get(
-            'https://api.spotify.com/v1/me/player/currently-playing',
-            headers={
-                "Authorization": "Bearer " + self.token
-            }
-        )
-
-        if req.status_code == 429:
-            logger.warning("Rate limit exceeded! Please adjust the Spotify fetch delay")
-            return None
-
-        if req.status_code == 204:
-            return None
-
-        data = req.json()
+    def start_server(self):
+        """Create and return a raw socket server wrapper."""
         
-        # Veri güvenliği kontrolü
-        if not data or not data.get("item"):
-            return None
+        class RawSpotifyServer:
+            def __init__(self, port, redirect_uri):
+                self.port = port
+                self.code = None
+                self.error = None
+                self.socket = None
+                
+                try:
+                    self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    self.socket.bind(('127.0.0.1', port))
+                    self.socket.listen(1)
+                    self.socket.settimeout(1)
+                except OSError as e:
+                    self.error = f"Port {port} is busy or unavailable ({e})"
+                    if self.socket:
+                        self.socket.close()
 
-        return {
-            "progress": data["progress_ms"],
-            "latency": int(req.elapsed.microseconds / 1000),
-            "duration": data["item"]["duration_ms"],
-            "artist": data["item"]["artists"][0]["name"],
-            "paused": not data["is_playing"],
-            "title": data["item"]["name"]
-        }
+            def handle_request(self):
+                if self.error: return
+                try:
+                    conn, addr = self.socket.accept()
+                    with conn:
+                        conn.settimeout(5.0)
+                        request_data = b""
+                        try:
+                            while True:
+                                chunk = conn.recv(1024)
+                                request_data += chunk
+                                if len(chunk) < 1024 or b"\r\n\r\n" in request_data:
+                                    break
+                        except TimeoutError:
+                            pass
+                            
+                        request_str = request_data.decode('utf-8', errors='ignore')
+                        first_line = request_str.split('\r\n')[0]
+                        
+                        response_body = "<html><body><h1>Authentication Successful!</h1><p>You can close this window now. (v7 - RAW SOCKET)</p><script>window.close()</script></body></html>"
+                        response = (
+                            "HTTP/1.1 200 OK\r\n"
+                            "Content-Type: text/html\r\n"
+                            "Connection: close\r\n"
+                            f"Content-Length: {len(response_body)}\r\n"
+                            "\r\n"
+                            f"{response_body}"
+                        )
+                        conn.sendall(response.encode('utf-8'))
 
-    def start_server(self, handler=RequestHandler):
-        server = HTTPServer(("localhost", self.port), handler)
-
-        if self.redirect_uri.startswith("https"):
-            generate_cert()
-            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            context.load_cert_chain(fetch_app_data_path('cert.pem'), fetch_app_data_path('key.pem'))
-            server.socket = context.wrap_socket(server.socket, server_side=True)
-
-        server.allow_reuse_address = True
-        server.code = None
-        server.error = None
-        return server
+                        if "GET" in first_line and "/callback" in first_line:
+                            try:
+                                path = first_line.split(" ")[1]
+                                query = parse_qs(urlparse(path).query)
+                                if 'code' in query:
+                                    self.code = query['code'][0]
+                                elif 'error' in query:
+                                    self.error = query['error'][0]
+                            except Exception as e:
+                                logger.error(f"Failed to parse raw request: {e}")
+                                self.error = "Parse error"
+                            
+                except TimeoutError:
+                    pass
+                except Exception as e:
+                    pass
+                    
+        return RawSpotifyServer(self.port, self.redirect_uri)

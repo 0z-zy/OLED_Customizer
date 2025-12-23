@@ -9,12 +9,19 @@ base_path = os.getcwd()
 
 # List of assets to include
 added_files = [
-    ('content/fonts/*.ttf', 'content/fonts'),
-    ('content/assets/icons/*.png', 'content/assets/icons'),
-    ('content/assets/icons/*.ico', 'content/assets/icons'),
     ('version.py', '.'),
     ('C:/Users/super/AppData/Local/Packages/PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0/LocalCache/local-packages/Python313/site-packages/HardwareMonitor/lib/*.dll', 'HardwareMonitor/lib'),
 ]
+
+# Recursively add everything in 'content' folder
+for root, dirs, files in os.walk('content'):
+    for filename in files:
+        if filename.endswith(".py") or filename.endswith(".pyc"): continue
+        file_path = os.path.join(root, filename)
+        # Target path inside bundle (preserve structure)
+        # e.g. content/fonts/MunroSmall.ttf -> content/fonts
+        target_dir = root.replace("\\", "/") 
+        added_files.append((file_path, target_dir))
 
 a = Analysis(
     ['main.py'],
@@ -39,6 +46,10 @@ a = Analysis(
         'HardwareMonitor.Hardware',
         'clr',
         'pythonnet',
+        'tkinter',
+        'pynput.keyboard._win32',
+        'pynput.mouse._win32',
+        'src.SettingsWindow',
     ],
     hookspath=[],
     hooksconfig={},
@@ -62,7 +73,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
@@ -73,4 +84,5 @@ exe = EXE(
     entitlements_file=None,
     icon=['content/assets/icons/icon.ico'],
     uac_admin=True,
+    version='version_info.py',
 )

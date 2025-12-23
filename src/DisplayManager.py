@@ -59,7 +59,7 @@ class DisplayManager:
 
         self.volume_overlay = VolumeOverlay(config)
         self.hardware_monitor = HardwareMonitor(config)
-        self.extension_receiver = ExtensionReceiver(port=2408)
+        self.extension_receiver = ExtensionReceiver(port=8888)
         self.extension_receiver.start()
 
         # Setup keyboard listener for INS key and Global Hotkeys
@@ -167,6 +167,18 @@ class DisplayManager:
         logger.info(f"Hotkeys bound: Monitor={self.key_monitor_val}, Mute={self.key_mute_val}")
 
         self._spotify_poll_ms = max(250, int(self.fetch_delay * 1000))
+        
+        # Reload Spotify credentials if they changed
+        if hasattr(self, "spotify_api"):
+            changed = self.spotify_api.reload_config()
+            # If credentials changed, force a re-fetch with prompt
+            if changed:
+                logger.info("Credentials changed, triggering re-auth...")
+                Thread(target=self.spotify_api.fetch_token, args=(True,), daemon=True).start()
+            
+            # If not ready (missing tokens) but config didn't change, we do NOTHING directly here.
+            # The user must fix the config in the settings window to trigger the 'changed' path.
+            # OR we could silently try to fetch if prompt_user=False? No, let's keep it clean.
 
     def _parse_key(self, key_str):
         if not key_str or not keyboard:
@@ -193,7 +205,12 @@ class DisplayManager:
             return None
 
     def init(self):
-        self.spotify_api.fetch_token()
+        # Startup: try to load token, but DO NOT open browser automatically (prompt_user=False)
+        # Run in thread to not block startup logic
+        def startup_auth():
+             self.spotify_api.fetch_token(prompt_user=False)
+             
+        Thread(target=startup_auth, daemon=True).start()
 
     def run(self):
         while True:

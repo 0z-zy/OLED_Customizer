@@ -46,7 +46,7 @@ OLED Customizer transforms your keyboard's small screen into a powerful, high-co
 *   **Admin Access**: Required for hardware sensor readings.
 
 ### 2. Getting Started
-1. Download the latest **`Launcher.exe`**.
+1. Download the latest **`OLED-Customizer.exe`**.
 2. Run the application (it will sit quietly in your System Tray).
 3. **Right-Click the Tray Icon** to access settings.
 4. Go to the **Spotify** tab to link your account.
@@ -69,7 +69,7 @@ To sync with Spotify, you need to create a "key" on the Spotify Developer portal
     - Paste your **Client ID** and **Client Secret**.
     - Set the **Redirect URI** to `http://127.0.0.1:2408/callback`.
     - Set the **Port** to `2408`.
-3. Click **SAVE** and restart the app.
+3. Click **SAVE** (The app will restart automatically to apply changes).
 
 ---
 

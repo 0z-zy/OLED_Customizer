@@ -168,12 +168,32 @@ class SettingsGUI:
         self.root.overrideredirect(True) # Frameless
         self.root.geometry("640x480")
         self.root.configure(bg=Colors.BG_ROOT)
+        
         # Center
         self.root.update_idletasks()
         x = (self.root.winfo_screenwidth() - 640) // 2
         y = (self.root.winfo_screenheight() - 480) // 2
         self.root.geometry(f"+{x}+{y}")
         
+        # FIX: Force taskbar icon for frameless window
+        import ctypes
+        from ctypes import windll
+        
+        def set_appwindow(root):
+            GWL_EXSTYLE = -20
+            WS_EX_APPWINDOW = 0x00040000
+            WS_EX_TOOLWINDOW = 0x00000080
+            hwnd = windll.user32.GetParent(root.winfo_id())
+            style = windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            style = style & ~WS_EX_TOOLWINDOW
+            style = style | WS_EX_APPWINDOW
+            windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+            # Re-assert frame
+            root.wm_withdraw()
+            root.after(10, lambda: root.wm_deiconify())
+
+        self.root.after(10, lambda: set_appwindow(self.root))
+
         # Styles
         style = ttk.Style()
         style.theme_use('clam')
@@ -429,24 +449,51 @@ class SettingsGUI:
         pick_btn.pack(side="right", padx=5)
 
     def _save_all(self):
-        # Gather all vars
-        for k, v in self.vars.items():
-            if k in ["scrollbar_padding", "text_padding_left", "local_port"]:
-                try: val = int(v.get())
-                except: val = 0
-                self.prefs.preferences[k] = val
+        try:
+            # Gather all vars
+            for k, v in self.vars.items():
+                val = v.get()
+                logger.info(f"Saving {k}: {val}")
+                
+                if k in ["scrollbar_padding", "text_padding_left", "local_port"]:
+                    try: val = int(val)
+                    except: val = 0
+                    self.prefs.preferences[k] = val
+                else:
+                    self.prefs.preferences[k] = val
+            
+            self.prefs.preferences["rgb_color"] = self.rgb
+            self.prefs.save_preferences()
+            logger.info("Settings Saved via Ultra-Premium GUI")
+            
+            # Show success message – include update instruction only on Spotify page
+            if getattr(self, "current_page", None) == "Spotify":
+                tk.messagebox.showinfo(
+                    "Restart Required",
+                    "Spotify settings changed. The application will now restart to apply changes."
+                )
+                self.root.destroy()
+                
+                # Restart Application
+                import sys
+                import subprocess
+                import os
+                
+                # Wait 1s and restart
+                subprocess.Popen(f'cmd /c "timeout /t 1 && start "" "{sys.executable}"', shell=True)
+                os._exit(0)
             else:
-                self.prefs.preferences[k] = v.get()
-        
-        self.prefs.preferences["rgb_color"] = self.rgb
-        self.prefs.save_preferences()
-        logger.info("Settings Saved via Ultra-Premium GUI")
-        
-        if self.on_save:
-            try: self.on_save()
-            except: pass
-        
-        self.root.destroy()
+                tk.messagebox.showinfo("Success", "Settings saved!")
+
+            # Trigger callback (which calls DisplayManager.update_config which calls update_preferences)
+            if self.on_save:
+                try: self.on_save()
+                except: pass
+
+            self.root.destroy()
+        except Exception as e:
+            logger.error(f"Failed to save settings: {e}")
+            tk.messagebox.showerror("Error", f"Failed to save settings:\n{e}")
 
 
 def open_settings(prefs, callback=None):
