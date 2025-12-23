@@ -27,13 +27,9 @@ OLED Customizer transforms your keyboard's small screen into a powerful, high-co
 *   **Intelligent Switching**: Seamlessly transitions between music info and the clock.
 *   **Pixel-Perfect Icons**: Custom YouTube and Media icons designed specifically for the 128x40 display.
 
-````carousel
-![Spotify Player](content/demos/demo_player.gif)
-<!-- slide -->
-![YouTube Player](content/demos/demo_player_youtube.gif)
-<!-- slide -->
-![System Media](content/demos/demo_player_generic.gif)
-````
+| Spotify | YouTube | Generic Media |
+| :---: | :---: | :---: |
+| ![Spotify](content/demos/demo_player.gif) | ![YouTube](content/demos/demo_player_youtube.gif) | ![Generic](content/demos/demo_player_generic.gif) |
 
 ### 🌡️ Ghost-Monitor (Hardware Stats)
 *   **Instant Peek**: Tap **INS (Insert)** to summon your system stats over any screen.
