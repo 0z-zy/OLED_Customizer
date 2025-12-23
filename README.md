@@ -10,6 +10,14 @@ OLED Customizer transforms your keyboard's small screen into a powerful, high-co
 
 ---
 
+## ☕ Support the Project
+
+If you find OLED Customizer useful and want to support its development, you can buy me a coffee!
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Donate-orange?style=for-the-badge&logo=buy-me-a-coffee)](https://buymeacoffee.com/ozzy_/)
+
+---
+
 ## � Table of Contents
 - [�🚀 Key Highlights](#-key-highlights)
 - [🛠️ Quick Setup](#️-quick-setup)
@@ -130,4 +138,5 @@ OLED Customizer is a highly evolved rebrand, inspired by the foundations of [Ste
 ---
 
 **Crafted for enthusiasts. Rebranded and Enhanced by [0z-zy](https://github.com/0z-zy).**
+
 
