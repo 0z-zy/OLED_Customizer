@@ -118,7 +118,159 @@ class SpotifyAPI:
         finally:
             self._auth_lock.release()
 
-    # ... (skipping unchanged code until start_server) ...
+    def load_token(self):
+        """Load token from credentials.json. Returns True if valid token exists."""
+        try:
+            with open(fetch_app_data_path("credentials.json"), "r") as f:
+                data = loads(f.read())
+                self.token = data.get("token", "")
+                self.refresh_token = data.get("refresh_token", "")
+                self.expires = data.get("expires", -1)
+                
+                if not self.token or not self.refresh_token:
+                    return False
+                
+                # Check if expired and refresh if needed
+                if time() >= self.expires:
+                    logger.info("Token expired, refreshing...")
+                    return self.refresh_access_token()
+                
+                return True
+        except FileNotFoundError:
+            logger.info("No credentials.json found - will need to authenticate.")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to load token: {e}")
+            return False
+
+    def save_token(self):
+        """Save current token to credentials.json."""
+        try:
+            with open(fetch_app_data_path("credentials.json"), "w") as f:
+                f.write(dumps({
+                    "token": self.token,
+                    "refresh_token": self.refresh_token,
+                    "expires": self.expires
+                }))
+            logger.info("Token saved to credentials.json")
+        except Exception as e:
+            logger.error(f"Failed to save token: {e}")
+
+    def retrieve_token(self, code):
+        """Exchange authorization code for access token."""
+        try:
+            auth_header = b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
+            response = self.session.post(
+                self.SPOTIFY_API_URL + "/api/token",
+                headers={
+                    "Authorization": f"Basic {auth_header}",
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                data={
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "redirect_uri": self.redirect_uri
+                }
+            )
+            
+            if response.status_code != 200:
+                logger.error(f"Token exchange failed: {response.status_code} - {response.text}")
+                return False
+            
+            data = response.json()
+            self.token = data.get("access_token", "")
+            self.refresh_token = data.get("refresh_token", "")
+            self.expires = time() + data.get("expires_in", 3600) - 60  # Refresh 1 min early
+            
+            self.save_token()
+            logger.info("Successfully retrieved and saved token!")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to retrieve token: {e}")
+            return False
+
+    def refresh_access_token(self):
+        """Refresh the access token using the refresh token."""
+        try:
+            auth_header = b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
+            response = self.session.post(
+                self.SPOTIFY_API_URL + "/api/token",
+                headers={
+                    "Authorization": f"Basic {auth_header}",
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": self.refresh_token
+                }
+            )
+            
+            if response.status_code != 200:
+                logger.error(f"Token refresh failed: {response.status_code} - {response.text}")
+                return False
+            
+            data = response.json()
+            self.token = data.get("access_token", "")
+            # Refresh token may or may not change
+            if "refresh_token" in data:
+                self.refresh_token = data["refresh_token"]
+            self.expires = time() + data.get("expires_in", 3600) - 60
+            
+            self.save_token()
+            logger.info("Successfully refreshed token!")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to refresh token: {e}")
+            return False
+
+    def fetch_song(self):
+        """Fetch currently playing song from Spotify."""
+        if not self.ready or not self.token:
+            return None
+        
+        # Check if token needs refresh
+        if time() >= self.expires:
+            if not self.refresh_access_token():
+                return None
+        
+        try:
+            response = self.session.get(
+                "https://api.spotify.com/v1/me/player/currently-playing",
+                headers={"Authorization": f"Bearer {self.token}"}
+            )
+            
+            if response.status_code == 204:
+                # No content - nothing playing
+                return None
+            
+            if response.status_code == 401:
+                # Token expired, try refresh
+                if self.refresh_access_token():
+                    return self.fetch_song()
+                return None
+            
+            if response.status_code != 200:
+                return None
+            
+            data = response.json()
+            
+            if not data or not data.get("item"):
+                return None
+            
+            item = data["item"]
+            artists = ", ".join([a["name"] for a in item.get("artists", [])])
+            
+            return {
+                "title": item.get("name", "Unknown"),
+                "artist": artists,
+                "duration": item.get("duration_ms", 0),
+                "progress": data.get("progress_ms", 0),
+                "paused": not data.get("is_playing", False)
+            }
+        except Exception as e:
+            logger.error(f"Failed to fetch song: {e}")
+            return None
+
 
     def start_server(self):
         """Create and return a raw socket server wrapper."""
