@@ -468,6 +468,11 @@ class SettingsGUI:
             
             # Show success message – include update instruction only on Spotify page
             if getattr(self, "current_page", None) == "Spotify":
+                # Trigger callback BEFORE destroying (so reload_config deletes credentials.json)
+                if self.on_save:
+                    try: self.on_save()
+                    except: pass
+                    
                 tk.messagebox.showinfo(
                     "Restart Required",
                     "Spotify settings changed. Please restart the application manually."
