@@ -12,9 +12,10 @@ dist/
 build/
 *.exe
 
-# Except the main executable
+# Except the main executables
 !OLED-Customizer.exe
 !OLED-Customizer.spec
+!uninstall.exe
 
 # User specific
 config.json
