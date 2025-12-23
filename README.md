@@ -12,7 +12,9 @@ OLED Customizer transforms your keyboard's small screen into a powerful, high-co
 *   **Intelligent Switching**: Seamlessly transitions between music info and the clock.
 *   **Pixel-Perfect Icons**: Custom YouTube and Media icons designed specifically for the 128x40 display.
 
-![Player Demo](content/demos/demo_player.gif)
+![Spotify Player](content/demos/demo_player.gif)
+![YouTube Player](content/demos/demo_player_youtube.gif)
+![System Media](content/demos/demo_player_generic.gif)
 
 ### 🌡️ Ghost-Monitor (Hardware Stats)
 *   **Instant Peek**: Tap **INS (Insert)** to summon your system stats over any screen.
@@ -89,7 +91,12 @@ The app is built for those who like to tweak. Access `%APPDATA%/OLED Customizer/
 - **Text Indentation (px)**: Controls the starting position of song titles to ensure they don't overlap the app icons.
 - **Sync**: Match your OLED behavior with your keyboard's RGB profile.
 
-![Clock Demo](content/demos/demo_clock.gif)
+### 🕰️ Clock Gallery
+Choose the style that fits your aesthetic:
+
+| Standard | Analog | Big Timer | Date Focused |
+| :---: | :---: | :---: | :---: |
+| ![Standard](content/demos/demo_clock.gif) | ![Analog](content/demos/demo_clock_analog.gif) | ![Big](content/demos/demo_clock_big.gif) | ![Date](content/demos/demo_clock_date.gif) |
 
 ---
 
