@@ -208,7 +208,7 @@ class DisplayManager:
         # Startup: try to load token, but DO NOT open browser automatically (prompt_user=False)
         # Run in thread to not block startup logic
         def startup_auth():
-             self.spotify_api.fetch_token(prompt_user=False)
+             self.spotify_api.fetch_token(prompt_user=True)
              
         Thread(target=startup_auth, daemon=True).start()
 

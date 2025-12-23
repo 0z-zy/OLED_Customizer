@@ -18,6 +18,7 @@ class SpotifyPlayer:
             ),
             size=11,
         )
+
         self.DURATION_FONT = self.ARTIST_FONT
 
         self.config = config

@@ -470,7 +470,7 @@ class SettingsGUI:
             if getattr(self, "current_page", None) == "Spotify":
                 tk.messagebox.showinfo(
                     "Restart Required",
-                    "Spotify settings changed. The application will now restart to apply changes."
+                    "Spotify settings changed. Please restart the application manually."
                 )
                 self.root.destroy()
                 
@@ -480,8 +480,8 @@ class SettingsGUI:
                 import os
                 
                 # Wait 1s and restart
-                subprocess.Popen(f'cmd /c "timeout /t 1 && start "" "{sys.executable}"', shell=True)
-                os._exit(0)
+                # subprocess.Popen(f'cmd /c "timeout /t 1 && start "" "{sys.executable}"', shell=True)
+                # os._exit(0)
             else:
                 tk.messagebox.showinfo("Success", "Settings saved!")
 
