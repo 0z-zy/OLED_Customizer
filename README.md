@@ -18,8 +18,8 @@ If you find OLED Customizer useful and want to support its development, you can 
 
 ---
 
-## � Table of Contents
-- [�🚀 Key Highlights](#-key-highlights)
+## 📋 Table of Contents
+- [🚀 Key Highlights](#-key-highlights)
 - [🛠️ Quick Setup](#️-quick-setup)
 - [🎵 Spotify API Setup](#-spotify-api-setup)
 - [🌐 Browser Sync](#-browser-sync-installation)
@@ -129,7 +129,7 @@ Access `%APPDATA%/OLED Customizer/config.json` or use the **Settings GUI** to ad
 
 ## 📚 Acknowledgments
 
-OLED Customizer is a highly evolved rebrand, inspired by the foundations of [SteelSeries-Spotify-Linker](https://github.com/0z-zy/OLED_Customizer).
+OLED Customizer is a highly evolved rebrand, inspired by the foundations of [SteelSeries-Spotify-Linker](https://github.com/Firewee/SteelSeries-Spotify-Linker).
 
 - **Backend**: GameSense™ SDK
 - **Sensors**: LibreHardwareMonitor
@@ -138,5 +138,3 @@ OLED Customizer is a highly evolved rebrand, inspired by the foundations of [Ste
 ---
 
 **Crafted for enthusiasts. Rebranded and Enhanced by [0z-zy](https://github.com/0z-zy).**
-
-
