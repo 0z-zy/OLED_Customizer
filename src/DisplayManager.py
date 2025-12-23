@@ -43,6 +43,7 @@ class DisplayManager:
         self.display_hw_monitor = False
 
         self.user_preferences = UserPreferences()
+        self.user_preferences.load_preferences()  # Load saved preferences FIRST
         self.timer = Timer(
             config,
             self.user_preferences.get_preference("date_format"),
