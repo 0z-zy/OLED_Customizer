@@ -256,6 +256,7 @@ class SettingsGUI:
         self.vars["clock_style"] = tk.StringVar(value=self.prefs.get_preference("clock_style") or "Standard")
         self.vars["display_seconds"] = tk.BooleanVar(value=bool(self.prefs.get_preference("display_seconds")))
         self.vars["use_turkish_days"] = tk.BooleanVar(value=bool(self.prefs.get_preference("use_turkish_days")))
+        self.vars["date_format"] = tk.BooleanVar(value=(str(self.prefs.get_preference("date_format")) == "24"))
         # Display
         self.vars["display_timer"] = tk.BooleanVar(value=bool(self.prefs.get_preference("display_timer")))
         self.vars["display_player"] = tk.BooleanVar(value=bool(self.prefs.get_preference("display_player")))
@@ -280,6 +281,7 @@ class SettingsGUI:
         p_gen = tk.Frame(self.content_area, bg=Colors.CONTENT)
         self._header(p_gen, "⚙️ General Settings")
         self._dropdown_row(p_gen, "Clock Design", self.vars["clock_style"], ["Standard", "Big Timer", "Date Focused", "Analog"])
+        self._toggle_row(p_gen, "Use 24-Hour Format", self.vars["date_format"])
         self._toggle_row(p_gen, "Show Seconds", self.vars["display_seconds"])
         self._toggle_row(p_gen, "Use Turkish Language", self.vars["use_turkish_days"])
         self.pages["General"] = p_gen
@@ -461,6 +463,8 @@ class SettingsGUI:
                     try: val = int(val)
                     except: val = 0
                     self.prefs.preferences[k] = val
+                elif k == "date_format":
+                    self.prefs.preferences[k] = 24 if val else 12
                 else:
                     self.prefs.preferences[k] = val
             
