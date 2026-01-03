@@ -257,6 +257,7 @@ class SettingsGUI:
         self.vars["display_seconds"] = tk.BooleanVar(value=bool(self.prefs.get_preference("display_seconds")))
         self.vars["use_turkish_days"] = tk.BooleanVar(value=bool(self.prefs.get_preference("use_turkish_days")))
         self.vars["date_format"] = tk.BooleanVar(value=(str(self.prefs.get_preference("date_format")) == "24"))
+        self.vars["player_style"] = tk.StringVar(value=self.prefs.get_preference("player_style") or "Standard")
         # Display
         self.vars["display_timer"] = tk.BooleanVar(value=bool(self.prefs.get_preference("display_timer")))
         self.vars["display_player"] = tk.BooleanVar(value=bool(self.prefs.get_preference("display_player")))
@@ -293,6 +294,7 @@ class SettingsGUI:
         self._toggle_row(p_disp, "Enable Clock", self.vars["display_timer"], 
                           command=lambda: self._exclusive_toggle("display_timer", "display_hw_monitor"))
         self._toggle_row(p_disp, "Enable Music Info", self.vars["display_player"])
+        self._dropdown_row(p_disp, "Player Style", self.vars["player_style"], ["Standard", "Compact", "Centered", "Ticker", "Minimal"], command=self._quick_save)
         self._toggle_row(p_disp, "Always Show System Stats", self.vars["display_hw_monitor"],
                           command=lambda: self._exclusive_toggle("display_hw_monitor", "display_timer"))
         self.pages["Display"] = p_disp
@@ -368,6 +370,28 @@ class SettingsGUI:
             for child in widget.winfo_children():
                 if isinstance(child, ToggleSwitch):
                     child._draw()
+    
+    def _quick_save(self):
+        """Silent save without closing the window - for auto-save dropdowns."""
+        try:
+            for k, v in self.vars.items():
+                val = v.get()
+                if k in ["scrollbar_padding", "text_padding_left", "local_port"]:
+                    try: val = int(val)
+                    except: val = 0
+                elif k == "date_format":
+                    val = 24 if val else 12
+                self.prefs.preferences[k] = val
+            
+            self.prefs.preferences["rgb_color"] = self.rgb
+            self.prefs.save_preferences()
+            
+            # Trigger callback silently
+            if self.on_save:
+                try: self.on_save()
+                except: pass
+        except Exception as e:
+            logger.error(f"Quick save failed: {e}")
 
     # --- UI COMPONENTS ---
     def _header(self, parent, text):
@@ -385,11 +409,13 @@ class SettingsGUI:
         switch = ToggleSwitch(f, var, command=command)
         switch.pack(side="right", padx=15)
 
-    def _dropdown_row(self, parent, label, var, options):
+    def _dropdown_row(self, parent, label, var, options, command=None):
         f = self._row_frame(parent)
         tk.Label(f, text=label, font=FONT_BODY, fg=Colors.TEXT_MAIN, bg=Colors.CARD_BG).pack(side="left", padx=15)
         cb = ttk.Combobox(f, textvariable=var, values=options, state="readonly", width=15)
         cb.pack(side="right", padx=15)
+        if command:
+            cb.bind("<<ComboboxSelected>>", lambda e: command())
 
     def _entry_row(self, parent, label, var, width=10, show=None):
         f = self._row_frame(parent)

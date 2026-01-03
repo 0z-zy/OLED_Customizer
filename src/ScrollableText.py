@@ -18,6 +18,11 @@ class ScrollableText:
         self.set_text(content, font)
         self.pos_y = pos_y
         self.steps_calculated = False
+        
+        # Optional overrides for custom layouts (set before draw_next_step)
+        self.custom_x = None  # Left edge X position for bounded drawing
+        self.custom_width = None  # Available width for text
+        self.left_align = False  # If True, draw left-aligned starting at custom_x
 
     def increase_step(self):
         self.intern_step += 1
@@ -47,6 +52,18 @@ class ScrollableText:
         self.increase_step()
         self.draw_step(draw, self.intern_step)
 
+    def _get_available_width(self):
+        """Get the available width for text."""
+        if self.custom_width is not None:
+            return self.custom_width
+        return self.config.width - self.config.text_padding_left
+    
+    def _get_left_edge(self):
+        """Get the left X position for drawing."""
+        if self.custom_x is not None:
+            return self.custom_x
+        return self.config.text_padding_left
+
     def pre_calculate_scroll_metrics(self, draw):
         """
         Calculates and initializes all metrics required for horizontal text scrolling.
@@ -54,12 +71,13 @@ class ScrollableText:
         if self.steps_calculated:
             return
 
+        available_width = self._get_available_width()
         self.content_pixels_size = int(draw.textlength(self.content, font=self.font))
-        self.text_offset = self.content_pixels_size - (self.config.width - self.config.text_padding_left)
+        self.text_offset = self.content_pixels_size - available_width
 
-        if self.content_pixels_size > (self.config.width - self.config.text_padding_left):
+        if self.content_pixels_size > available_width:
             self.need_scrolling = True
-            self.max_step = 2 * self.config.pause_steps + self.content_pixels_size - (self.config.width - self.config.text_padding_left)
+            self.max_step = 2 * self.config.pause_steps + self.content_pixels_size - available_width
         else:
             self.need_scrolling = False
         
@@ -71,28 +89,60 @@ class ScrollableText:
         if step < 0:
             step = self.intern_step
 
-        if not self.need_scrolling:
-            draw.text(
-                (self.config.width - 1, self.pos_y), 
-                self.content, 
-                font=self.font, 
-                anchor="rm", 
-                fill=self.config.primary
-            )
-            return
+        left_edge = self._get_left_edge()
+        available_width = self._get_available_width()
+        right_edge = left_edge + available_width - 1
 
-        if (step - self.config.pause_steps) > self.text_offset:
-            step = self.text_offset
-        else:
-            if step <= self.config.pause_steps:
-                step = 0
+        # For left-aligned mode: draw from left edge, clip at right
+        if self.left_align or self.custom_x is not None:
+            if not self.need_scrolling:
+                # Static: draw at left edge
+                draw.text(
+                    (left_edge, self.pos_y), 
+                    self.content, 
+                    font=self.font, 
+                    anchor="lm",  # left-middle
+                    fill=self.config.primary
+                )
             else:
-                step -= self.config.pause_steps
+                # Scrolling: text moves left over time
+                if (step - self.config.pause_steps) > self.text_offset:
+                    scroll = self.text_offset
+                elif step <= self.config.pause_steps:
+                    scroll = 0
+                else:
+                    scroll = step - self.config.pause_steps
 
-        draw.text(
-            (self.config.width - 1 + self.text_offset - step, self.pos_y), 
-            self.content, 
-            font=self.font, 
-            anchor="rm",
-            fill=self.config.primary
-        )
+                draw.text(
+                    (left_edge - scroll, self.pos_y), 
+                    self.content, 
+                    font=self.font, 
+                    anchor="lm",
+                    fill=self.config.primary
+                )
+        else:
+            # Original right-aligned mode for standard layout
+            if not self.need_scrolling:
+                draw.text(
+                    (self.config.width - 1, self.pos_y), 
+                    self.content, 
+                    font=self.font, 
+                    anchor="rm", 
+                    fill=self.config.primary
+                )
+            else:
+                if (step - self.config.pause_steps) > self.text_offset:
+                    step = self.text_offset
+                elif step <= self.config.pause_steps:
+                    step = 0
+                else:
+                    step -= self.config.pause_steps
+
+                draw.text(
+                    (self.config.width - 1 + self.text_offset - step, self.pos_y), 
+                    self.content, 
+                    font=self.font, 
+                    anchor="rm",
+                    fill=self.config.primary
+                )
+

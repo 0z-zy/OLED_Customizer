@@ -171,6 +171,9 @@ class DisplayManager:
             self.timer.set_use_turkish_days(self.user_preferences.get_preference("use_turkish_days"))
         if hasattr(self.timer, "set_style"):
             self.timer.set_style(self.user_preferences.get_preference("clock_style"))
+            
+        if hasattr(self.player, "set_style"):
+            self.player.set_style(self.user_preferences.get_preference("player_style"))
 
         # Hotkeys
         self.key_monitor_val = self._parse_key(self.user_preferences.get_preference("hotkey_monitor"))

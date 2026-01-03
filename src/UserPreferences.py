@@ -36,7 +36,9 @@ class UserPreferences:
         "text_padding_left": 30,
         "width": 128,
         "height": 40,
-        "auto_launch_gg": False
+        "height": 40,
+        "auto_launch_gg": False,
+        "player_style": "Standard"
     }
 
     def __init__(self):
