@@ -88,6 +88,16 @@ def set_clock_style(icon, style):
     icon.manager.update_preferences()
     icon.update_menu()
 
+def set_player_style(icon, style):
+    if not icon.manager.user_preferences.valid:
+        return
+    
+    icon.manager.user_preferences.preferences["player_style"] = style
+    icon.manager.user_preferences.save_preferences()
+    icon.manager.update_preferences()
+    icon.update_menu()
+
+
 def open_install_folder(icon):
     path_to_open = os.getcwd()
     if getattr(sys, 'frozen', False):
@@ -155,9 +165,45 @@ def run_systray_async(display_manager):
             enabled=lambda item: display_manager.enabled,
         ),
         Item(
-            "Display Player",
-            toggle_player,
-            checked=lambda item: display_manager.display_player,
+            "Player",
+            Menu(
+                Item(
+                    "Show Player",
+                    toggle_player,
+                    checked=lambda item: display_manager.display_player,
+                ),
+                Menu.SEPARATOR,
+                Item(
+                    "Standard",
+                    lambda icon, item: set_player_style(icon, "Standard"),
+                    radio=True,
+                    checked=lambda item: display_manager.user_preferences.get_preference("player_style") == "Standard"
+                ),
+                Item(
+                    "Compact",
+                    lambda icon, item: set_player_style(icon, "Compact"),
+                    radio=True,
+                    checked=lambda item: display_manager.user_preferences.get_preference("player_style") == "Compact"
+                ),
+                Item(
+                    "Centered",
+                    lambda icon, item: set_player_style(icon, "Centered"),
+                    radio=True,
+                    checked=lambda item: display_manager.user_preferences.get_preference("player_style") == "Centered"
+                ),
+                Item(
+                    "Ticker",
+                    lambda icon, item: set_player_style(icon, "Ticker"),
+                    radio=True,
+                    checked=lambda item: display_manager.user_preferences.get_preference("player_style") == "Ticker"
+                ),
+                Item(
+                    "Minimal",
+                    lambda icon, item: set_player_style(icon, "Minimal"),
+                    radio=True,
+                    checked=lambda item: display_manager.user_preferences.get_preference("player_style") == "Minimal"
+                ),
+            ),
             enabled=lambda item: display_manager.enabled,
         ),
         Item(
