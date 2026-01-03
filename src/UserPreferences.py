@@ -35,7 +35,8 @@ class UserPreferences:
         "scrollbar_padding": 2,
         "text_padding_left": 30,
         "width": 128,
-        "height": 40
+        "height": 40,
+        "auto_launch_gg": False
     }
 
     def __init__(self):

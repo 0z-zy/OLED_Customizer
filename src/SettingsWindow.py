@@ -275,6 +275,7 @@ class SettingsGUI:
         # Advanced
         self.vars["scrollbar_padding"] = tk.StringVar(value=str(self.prefs.get_preference("scrollbar_padding") or "2"))
         self.vars["text_padding_left"] = tk.StringVar(value=str(self.prefs.get_preference("text_padding_left") or "30"))
+        self.vars["auto_launch_gg"] = tk.BooleanVar(value=bool(self.prefs.get_preference("auto_launch_gg")))
 
     def _create_pages(self):
         # -- GENERAL PAGE --
@@ -336,6 +337,10 @@ class SettingsGUI:
                  
         self._entry_row(p_adv, "Text Indentation (px)", self.vars["text_padding_left"])
         tk.Label(p_adv, text="   Shifts titles to the right to avoid overlapping app icons.", 
+                 font=FONT_SMALL, fg=Colors.TEXT_DIM, bg=Colors.CONTENT).pack(anchor="w", pady=(0, 10))
+        
+        self._toggle_row(p_adv, "Auto-Launch SteelSeries GG", self.vars["auto_launch_gg"])
+        tk.Label(p_adv, text="   Automatically starts SteelSeries GG if not running.", 
                  font=FONT_SMALL, fg=Colors.TEXT_DIM, bg=Colors.CONTENT).pack(anchor="w", pady=(0, 10))
         self.pages["Advanced"] = p_adv
 

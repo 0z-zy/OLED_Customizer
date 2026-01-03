@@ -104,3 +104,47 @@ def is_process_running(process_names):
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             pass
     return False
+
+def find_steelseries_gg_path():
+    """
+    Attempts to locate the SteelSeries GG executable in common installation directories.
+    """
+    common_paths = [
+        r"C:\Program Files\SteelSeries\GG\SteelSeriesGG.exe",
+        r"C:\Program Files (x86)\SteelSeries\GG\SteelSeriesGG.exe",
+        r"C:\Program Files\SteelSeries\SteelSeries Engine 3\SteelSeriesEngine3.exe",
+        r"C:\Program Files (x86)\SteelSeries\SteelSeries Engine 3\SteelSeriesEngine3.exe"
+    ]
+    
+    for p in common_paths:
+        if path.exists(p):
+            return p
+            
+    return None
+
+def launch_process(process_path, arguments=None):
+    """
+    Launches a process from the given path non-blocking.
+    Uses ShellExecute to handle UAC elevation if required (WinError 740).
+    """
+    if not process_path or not path.exists(process_path):
+        return False
+        
+    try:
+        import ctypes
+        # ShellExecuteW(hwnd, operation, file, parameters, directory, show_cmd)
+        
+        directory = path.dirname(process_path)
+        ret = ctypes.windll.shell32.ShellExecuteW(None, "open", process_path, arguments, directory, 1)
+        
+        # Returns > 32 on success
+        if ret > 32:
+            logger.info(f"Launched process: {process_path} args={arguments}")
+            return True
+        else:
+            logger.error(f"ShellExecute failed with code {ret} for {process_path}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Failed to launch process {process_path}: {e}")
+        return False

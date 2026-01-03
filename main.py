@@ -17,10 +17,15 @@ from src.DisplayManager import DisplayManager
 from src.utils import fetch_app_data_path
 
 
+log_file = path.join(fetch_app_data_path(), "debug.log")
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.FileHandler(log_file, mode='w', encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
+    ]
 )
 
 FPS = 10

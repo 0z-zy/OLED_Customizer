@@ -15,7 +15,7 @@ from src.Systray import run_systray_async
 from src.WindowsMedia import WindowsMedia
 from src.HardwareMonitor import HardwareMonitor
 from src.ExtensionReceiver import ExtensionReceiver
-from src.utils import is_process_running
+from src.utils import is_process_running, find_steelseries_gg_path, launch_process
 import asyncio
 
 try:
@@ -137,6 +137,9 @@ class DisplayManager:
         self._extension_last_data_ms = 0
         self._extension_lock_seconds = 5
         
+        self.auto_launch_gg = False
+        self._last_launch_attempt = 0
+        
         self.load_preferences()
 
     def load_preferences(self):
@@ -173,6 +176,8 @@ class DisplayManager:
         self.key_monitor_val = self._parse_key(self.user_preferences.get_preference("hotkey_monitor"))
         self.key_mute_val = self._parse_key(self.user_preferences.get_preference("hotkey_mute"))
         logger.info(f"Hotkeys bound: Monitor={self.key_monitor_val}, Mute={self.key_mute_val}")
+        
+        self.auto_launch_gg = self.user_preferences.get_preference("auto_launch_gg")
 
         self._spotify_poll_ms = max(250, int(self.fetch_delay * 1000))
         
@@ -235,8 +240,24 @@ class DisplayManager:
             gg_running = is_process_running(["SteelSeriesGG.exe", "SteelSeriesEngine3.exe"])
             
             if not gg_running:
-                 # If not running, just sleep and wait
                  self._gg_was_running = False
+                 
+                 # Auto-launch logic
+                 if self.auto_launch_gg:
+                     now_sec = time()
+                     if now_sec - self._last_launch_attempt > 60: # Limit attempts to once per minute
+                         self._last_launch_attempt = now_sec
+                         path = find_steelseries_gg_path()
+                         if path:
+                             logger.info("SteelSeries GG not found. Auto-launching...")
+                             # Specific arguments for SteelSeries GG
+                             args = r'-dataPath="C:\ProgramData\SteelSeries\GG" -dbEnv=production'
+                             launch_process(path, args)
+                             sleep(15) # Wait for it to start
+                         else:
+                             # logger.warning("Auto-launch enabled but SteelSeries GG path not found.")
+                             pass
+
                  sleep(2) 
                  continue
             
