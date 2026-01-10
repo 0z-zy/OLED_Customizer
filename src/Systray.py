@@ -10,6 +10,7 @@ from pystray import MenuItem as Item, Icon, Menu
 from src.image_utils import fetch_content_path
 from src.image_utils import fetch_content_path
 from src.utils import fetch_app_data_path, set_startup, is_startup_enabled
+from src.debug_utils import toggle_debug_logging, is_debug_enabled
 
 logger = logging.getLogger("Systray")
 systray_thread = None
@@ -116,6 +117,12 @@ def toggle_startup(icon):
     # Pystray menus are often static unless updated.
     # But usage of checked=lambda calls the function every time the menu is shown.
     pass
+    
+def toggle_debug(icon):
+    enable = not is_debug_enabled()
+    toggle_debug_logging(enable)
+    # Icon update isn't strictly necessary for checkbox lambda but good practice
+    pass
 
 def run_systray_async(display_manager):
     global systray_thread
@@ -217,6 +224,11 @@ def run_systray_async(display_manager):
             "Run at Startup",
             toggle_startup,
             checked=lambda item: is_startup_enabled(),
+        ),
+        Item(
+            "Enable Debug Logging",
+            toggle_debug,
+            checked=lambda item: is_debug_enabled(),
         ),
         Menu.SEPARATOR,
         Item(

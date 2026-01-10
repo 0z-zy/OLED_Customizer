@@ -7,9 +7,18 @@ import psutil
 import time
 import asyncio
 import sys
+import traceback
 
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+# --- FIX: Enforce CWD to script directory to fix startup issues ---
+if getattr(sys, 'frozen', False):
+    # If pyinstaller exe, use strict dir
+    os.chdir(os.path.dirname(sys.executable))
+else:
+    # If normal python, use script dir
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 from version import __version__
 from src.Config import Config
@@ -86,6 +95,20 @@ if __name__ == "__main__":
     )
 
     display_manager = DisplayManager(config, FPS)
-    display_manager.init()
-    logger.info("OLED Customizer running in version %s", __version__)
-    display_manager.run()
+    display_manager = DisplayManager(config, FPS)
+
+    try:
+        display_manager.init()
+        logger.info("OLED Customizer running in version %s", __version__)
+        display_manager.run()
+    except Exception as e:
+        logger.critical("Critical error in main loop: %s", e)
+        # Always log critical startup errors to file for debugging
+        try:
+            err_path = fetch_app_data_path("crash.log")
+            with open(err_path, "a") as f:
+                f.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] CRITICAL:\n")
+                f.write(traceback.format_exc())
+        except: 
+            pass
+        raise

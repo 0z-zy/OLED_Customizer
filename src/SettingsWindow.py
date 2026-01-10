@@ -8,6 +8,7 @@ from tkinter import ttk, colorchooser
 import logging
 
 logger = logging.getLogger("OLED Customizer.Settings")
+from src.utils import set_startup, is_startup_enabled
 
 # --- THEME CONSTANTS ---
 class Colors:
@@ -256,6 +257,10 @@ class SettingsGUI:
         self.vars["clock_style"] = tk.StringVar(value=self.prefs.get_preference("clock_style") or "Standard")
         self.vars["display_seconds"] = tk.BooleanVar(value=bool(self.prefs.get_preference("display_seconds")))
         self.vars["use_turkish_days"] = tk.BooleanVar(value=bool(self.prefs.get_preference("use_turkish_days")))
+        
+        # System
+        self.vars["run_on_start"] = tk.BooleanVar(value=is_startup_enabled())
+
         self.vars["date_format"] = tk.BooleanVar(value=(str(self.prefs.get_preference("date_format")) == "24"))
         self.vars["player_style"] = tk.StringVar(value=self.prefs.get_preference("player_style") or "Standard")
         # Display
@@ -286,6 +291,11 @@ class SettingsGUI:
         self._toggle_row(p_gen, "Use 24-Hour Format", self.vars["date_format"])
         self._toggle_row(p_gen, "Show Seconds", self.vars["display_seconds"])
         self._toggle_row(p_gen, "Use Turkish Language", self.vars["use_turkish_days"])
+        
+        # Spacer
+        tk.Frame(p_gen, bg=Colors.CONTENT, height=10).pack()
+        self._toggle_row(p_gen, "Run on Start", self.vars["run_on_start"])
+        
         self.pages["General"] = p_gen
         
         # -- DISPLAY PAGE --
@@ -501,6 +511,10 @@ class SettingsGUI:
             
             self.prefs.preferences["rgb_color"] = self.rgb
             self.prefs.save_preferences()
+            
+            # Apply System Settings
+            set_startup(self.vars["run_on_start"].get())
+            
             logger.info("Settings Saved via Ultra-Premium GUI")
             
             # Show success message – include update instruction only on Spotify page
