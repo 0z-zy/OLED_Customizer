@@ -42,48 +42,103 @@ def normalize_text(text: str) -> str:
 
 def set_startup(enable: bool):
     """
-    Add or remove the application from Windows Startup via Registry.
+    Add or remove the application from Windows Startup via Task Scheduler.
+    Uses Task Scheduler instead of Registry to allow running with highest privileges
+    without UAC prompts at login.
     """
-    key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
-    app_name = "OLED Customizer"
+    import subprocess
+    
+    task_name = "OLED Customizer"
     
     try:
         if getattr(sys, 'frozen', False):
             exe_path = sys.executable
         else:
-            exe_path = sys.executable  # In dev, this might be python.exe, which is not ideal but acceptable for now or use sys.argv[0]
-            # Better to point to the python script if not frozen? 
-            # For this user context, they rely on Launcher.exe mostly. 
-            # If running from source, this might register python.exe which is tricky with args.
-            # Using sys.argv[0] absolute path
-            exe_path = f'"{sys.executable}" "{path.abspath(sys.argv[0])}"'
-
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_ALL_ACCESS)
+            # Dev mode - not ideal but acceptable
+            exe_path = sys.executable
         
         if enable:
-            winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, exe_path)
-            logger.info(f"Added to startup: {exe_path}")
+            # First, delete any existing task to avoid conflicts
+            subprocess.run(
+                ['schtasks', '/delete', '/tn', task_name, '/f'],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            
+            # Create a new scheduled task that runs at logon with highest privileges
+            # /sc onlogon = trigger at user logon
+            # /rl highest = run with highest privileges (admin, no UAC prompt)
+            # /it = interactive (allows GUI)
+            result = subprocess.run(
+                [
+                    'schtasks', '/create',
+                    '/tn', task_name,
+                    '/tr', f'"{exe_path}"',
+                    '/sc', 'onlogon',
+                    '/rl', 'highest',
+                    '/it',
+                    '/f'  # Force overwrite if exists
+                ],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            
+            if result.returncode == 0:
+                logger.info(f"Added to startup via Task Scheduler: {exe_path}")
+                # Also clean up any old registry entry
+                _cleanup_old_registry_startup()
+            else:
+                logger.error(f"Failed to create scheduled task: {result.stderr}")
         else:
-            try:
-                winreg.DeleteValue(key, app_name)
-                logger.info("Removed from startup")
-            except FileNotFoundError:
-                pass
+            # Delete the scheduled task
+            result = subprocess.run(
+                ['schtasks', '/delete', '/tn', task_name, '/f'],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            
+            if result.returncode == 0:
+                logger.info("Removed from startup (Task Scheduler)")
+            else:
+                # Task might not exist, that's okay
+                logger.info("Startup task not found or already removed")
+            
+            # Also clean up any old registry entry
+            _cleanup_old_registry_startup()
                 
-        winreg.CloseKey(key)
     except Exception as e:
         logger.error(f"Failed to change startup settings: {e}")
 
-def is_startup_enabled() -> bool:
+def _cleanup_old_registry_startup():
+    """Remove any old registry-based startup entry."""
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
     app_name = "OLED Customizer"
     try:
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ)
-        winreg.QueryValueEx(key, app_name)
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_ALL_ACCESS)
+        try:
+            winreg.DeleteValue(key, app_name)
+            logger.info("Cleaned up old registry startup entry")
+        except FileNotFoundError:
+            pass
         winreg.CloseKey(key)
-        return True
-    except FileNotFoundError:
-        return False
+    except Exception:
+        pass
+
+def is_startup_enabled() -> bool:
+    """Check if the startup task exists in Task Scheduler."""
+    import subprocess
+    
+    task_name = "OLED Customizer"
+    try:
+        result = subprocess.run(
+            ['schtasks', '/query', '/tn', task_name],
+            capture_output=True,
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        return result.returncode == 0
     except Exception as e:
         logger.error(f"Failed to check startup status: {e}")
         return False
