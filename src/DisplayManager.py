@@ -139,6 +139,7 @@ class DisplayManager:
         
         self.auto_launch_gg = False
         self._last_launch_attempt = 0
+        self._last_frame_sent_time = 0
         
         self.load_preferences()
 
@@ -400,13 +401,16 @@ class DisplayManager:
                     if self.player.pause_started and (int(time() * 1000) - self.player.pause_started) > self.timer_threshold:
                         self.state = State.SHOW_CLOCK
 
-            # tek kanaldan gönder + duplicate skip
-            if frame_data is not None and frame_data != self._last_sent_frame:
-                try:
-                    self.steelseries_api.send_frame(frame_data)
-                    self._last_sent_frame = frame_data
-                except Exception:
-                    pass
+            # Send if image changed OR every 1 second anyway (to "claim" OLED back from games)
+            now_sec = time()
+            if frame_data is not None:
+                if (frame_data != self._last_sent_frame) or (now_sec - self._last_frame_sent_time > 1.0):
+                    try:
+                        self.steelseries_api.send_frame(frame_data)
+                        self._last_sent_frame = frame_data
+                        self._last_frame_sent_time = now_sec
+                    except Exception:
+                        pass
 
             sleep(1 / self.fps)
 
