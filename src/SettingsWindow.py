@@ -169,13 +169,13 @@ class SettingsGUI:
 
         self.root = tk.Tk()
         self.root.overrideredirect(True) # Frameless
-        self.root.geometry("640x480")
+        self.root.geometry("640x540")
         self.root.configure(bg=Colors.BG_ROOT)
         
         # Center
         self.root.update_idletasks()
         x = (self.root.winfo_screenwidth() - 640) // 2
-        y = (self.root.winfo_screenheight() - 480) // 2
+        y = (self.root.winfo_screenheight() - 540) // 2
         self.root.geometry(f"+{x}+{y}")
         
         # FIX: Force taskbar icon for frameless window
