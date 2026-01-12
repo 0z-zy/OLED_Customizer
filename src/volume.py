@@ -139,25 +139,33 @@ class VolumeOverlay:
         # Check Speaker
         if self._volume:
             try:
+                # GetMasterVolumeLevelScalar can throw if audio device is lost
                 vol = int(round(self._volume.GetMasterVolumeLevelScalar() * 100))
                 mute = bool(self._volume.GetMute())
                 
-                if vol != self._last_vol or mute != self._last_mute:
+                if self._last_vol is None:
+                    # Initial state capture - do not trigger overlay
+                    self._last_vol = vol
+                    self._last_mute = mute
+                elif vol != self._last_vol or mute != self._last_mute:
                     self._last_vol = vol
                     self._last_mute = mute
                     changed = True
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Speaker update failed: {e}")
                 
-        # Check Mic - Always monitor if mic exists
+        # Check Mic
         if self._mic_volume:
             try:
                 mic_mute = bool(self._mic_volume.GetMute())
-                if mic_mute != self._last_mic_mute:
+                if self._last_mic_mute is None:
+                    # Initial state capture - do not trigger overlay
+                    self._last_mic_mute = mic_mute
+                elif mic_mute != self._last_mic_mute:
                     self._last_mic_mute = mic_mute
                     changed = True
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Mic update failed: {e}")
         
         # Removed Discord-only reset logic
 
