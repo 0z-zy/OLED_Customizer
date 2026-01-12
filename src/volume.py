@@ -102,7 +102,7 @@ class VolumeOverlay:
             try:
                 current = bool(self._mic_volume.GetMute())
                 self._mic_volume.SetMute(not current, None)
-                if time() - self.app_start_time > 10.0:
+                if time() - self.app_start_time > 4.0:
                     self._last_change = time()
                 logger.info(f"Toggled System Mic Mute to {not current}")
                 return
@@ -114,7 +114,7 @@ class VolumeOverlay:
             self._last_mic_mute = False
         self._last_mic_mute = not self._last_mic_mute
         
-        if time() - self.app_start_time > 10.0:
+        if time() - self.app_start_time > 4.0:
             self._last_change = time()
         logger.info(f"Discord mode: Mic mute overlay = {self._last_mic_mute}")
 
@@ -135,7 +135,7 @@ class VolumeOverlay:
         if running != self._discord_running:
             self._discord_running = running
             # Check for actual change before triggering overlay
-            if time() - self.app_start_time > 10.0:
+            if time() - self.app_start_time > 4.0:
                 self._last_change = time()
 
     def update(self):
@@ -174,8 +174,8 @@ class VolumeOverlay:
                 logger.debug(f"Mic update failed: {e}")
         
         if changed:
-            # Shield against startup flicker - wait 10 seconds before allowing overlay to show
-            if time() - self.app_start_time > 10.0:
+            # Shield against startup flicker - wait 4 seconds before allowing overlay to show
+            if time() - self.app_start_time > 4.0:
                 self._last_change = time()
 
     def should_display(self) -> bool:

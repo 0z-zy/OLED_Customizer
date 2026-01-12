@@ -254,7 +254,7 @@ def run_systray_async(display_manager):
         Item(
             "Enable Debug Logging",
             toggle_debug,
-            checked=lambda item: is_debug_enabled(),
+            checked=lambda item: display_manager.user_preferences.preferences.get("debug_enabled", False),
         ),
         Menu.SEPARATOR,
         Item(
