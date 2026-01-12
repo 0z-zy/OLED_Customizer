@@ -60,6 +60,21 @@ class VolumeOverlay:
         # Discord State
         self._discord_running = False
         self._last_discord_check = 0
+        
+        # Initial state fetch to prevent showing overlay on startup
+        self._silent_init()
+
+    def _silent_init(self):
+        """Fetch initial state without triggering the overlay."""
+        try:
+            if self._volume:
+                self._last_vol = int(round(self._volume.GetMasterVolumeLevelScalar() * 100))
+                self._last_mute = bool(self._volume.GetMute())
+            if self._mic_volume:
+                self._last_mic_mute = bool(self._mic_volume.GetMute())
+        except Exception as e:
+            logger.debug(f"Silent init failed: {e}")
+        self._last_change = 0.0
 
     def _load_icons(self):
         # V4 Clean Icons

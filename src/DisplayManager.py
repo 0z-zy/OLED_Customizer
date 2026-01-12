@@ -253,8 +253,8 @@ class DisplayManager:
                          path = find_steelseries_gg_path()
                          if path:
                              logger.info("SteelSeries GG not found. Auto-launching...")
-                             # Launch with necessary dataPath but avoid iGPU-disabling flags if any
-                             args = r'-dataPath="C:\ProgramData\SteelSeries\GG"'
+                             # Launch with necessary dataPath and attempt background start
+                             args = r'-dataPath="C:\ProgramData\SteelSeries\GG" -minimized'
                              launch_process(path, args)
                              sleep(15) # Wait for it to start
                          else:
