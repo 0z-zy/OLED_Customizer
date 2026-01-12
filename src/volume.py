@@ -16,6 +16,7 @@ class VolumeOverlay:
     def __init__(self, config, timeout=1.5):
         self.config = config
         self.timeout = timeout
+        self.app_start_time = time() # Guard against startup flicker
 
         self._last_vol = None
         self._last_mute = None
@@ -130,7 +131,9 @@ class VolumeOverlay:
         
         if running != self._discord_running:
             self._discord_running = running
-            self._last_change = time()
+            # Check for actual change before triggering overlay
+            if time() - self.app_start_time > 3.0:
+                self._last_change = time()
 
     def update(self):
         self._check_discord()
@@ -167,13 +170,13 @@ class VolumeOverlay:
             except Exception as e:
                 logger.debug(f"Mic update failed: {e}")
         
-        # Removed Discord-only reset logic
-
         if changed:
-            self._last_change = time()
+            # Shield against startup flicker - wait 3 seconds before allowing overlay to show
+            if time() - self.app_start_time > 3.0:
+                self._last_change = time()
 
     def should_display(self) -> bool:
-        if self._last_vol is None: 
+        if self._last_change == 0.0:
             return False
         return (time() - self._last_change) < self.timeout
 
