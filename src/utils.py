@@ -1,3 +1,4 @@
+import os
 from os import path, getenv
 import winreg
 import sys
@@ -43,8 +44,8 @@ def normalize_text(text: str) -> str:
 def set_startup(enable: bool):
     """
     Add or remove the application from Windows Startup via Task Scheduler.
-    Uses Task Scheduler instead of Registry to allow running with highest privileges
-    without UAC prompts at login.
+    Uses PowerShell to create a robust task that runs with highest privileges
+    and ignores AC power restrictions.
     """
     import subprocess
     
@@ -54,58 +55,43 @@ def set_startup(enable: bool):
         if getattr(sys, 'frozen', False):
             exe_path = sys.executable
         else:
-            # Dev mode - not ideal but acceptable
-            exe_path = sys.executable
+            # Dev mode - include the script path
+            exe_path = f"{sys.executable}\" \"{os.path.abspath(sys.argv[0])}"
         
         if enable:
-            # First, delete any existing task to avoid conflicts
+            # PowerShell script to create a robust task
+            ps_cmd = f"""
+            $action = New-ScheduledTaskAction -Execute '{exe_path}'
+            $trigger = New-ScheduledTaskTrigger -AtLogon
+            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0
+            Register-ScheduledTask -TaskName '{task_name}' -Action $action -Trigger $trigger -Settings $settings -RunLevel Highest -Force
+            """
+            
+            result = subprocess.run(
+                ["powershell", "-Command", ps_cmd],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            
+            if result.returncode == 0:
+                logger.info(f"Added to startup (Task Scheduler): {exe_path}")
+                _cleanup_old_registry_startup()
+            else:
+                logger.error(f"Failed to create scheduled task: {result.stderr}")
+                # Fallback to simple schtasks if PowerShell fails
+                subprocess.run(
+                    ['schtasks', '/create', '/tn', task_name, '/tr', f'"{exe_path}"', '/sc', 'onlogon', '/rl', 'highest', '/f'],
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+        else:
+            # Delete the scheduled task
             subprocess.run(
                 ['schtasks', '/delete', '/tn', task_name, '/f'],
                 capture_output=True,
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
-            
-            # Create a new scheduled task that runs at logon with highest privileges
-            # /sc onlogon = trigger at user logon
-            # /rl highest = run with highest privileges (admin, no UAC prompt)
-            # /it = interactive (allows GUI)
-            result = subprocess.run(
-                [
-                    'schtasks', '/create',
-                    '/tn', task_name,
-                    '/tr', f'"{exe_path}"',
-                    '/sc', 'onlogon',
-                    '/rl', 'highest',
-                    '/it',
-                    '/f'  # Force overwrite if exists
-                ],
-                capture_output=True,
-                text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
-            
-            if result.returncode == 0:
-                logger.info(f"Added to startup via Task Scheduler: {exe_path}")
-                # Also clean up any old registry entry
-                _cleanup_old_registry_startup()
-            else:
-                logger.error(f"Failed to create scheduled task: {result.stderr}")
-        else:
-            # Delete the scheduled task
-            result = subprocess.run(
-                ['schtasks', '/delete', '/tn', task_name, '/f'],
-                capture_output=True,
-                text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
-            
-            if result.returncode == 0:
-                logger.info("Removed from startup (Task Scheduler)")
-            else:
-                # Task might not exist, that's okay
-                logger.info("Startup task not found or already removed")
-            
-            # Also clean up any old registry entry
+            logger.info("Removed from startup (Task Scheduler)")
             _cleanup_old_registry_startup()
                 
     except Exception as e:
@@ -166,7 +152,9 @@ def find_steelseries_gg_path():
     """
     common_paths = [
         r"C:\Program Files\SteelSeries\GG\SteelSeriesGG.exe",
+        r"C:\Program Files\SteelSeries\GG\SteelSeriesGGClient.exe",
         r"C:\Program Files (x86)\SteelSeries\GG\SteelSeriesGG.exe",
+        r"C:\Program Files (x86)\SteelSeries\GG\SteelSeriesGGClient.exe",
         r"C:\Program Files\SteelSeries\SteelSeries Engine 3\SteelSeriesEngine3.exe",
         r"C:\Program Files (x86)\SteelSeries\SteelSeries Engine 3\SteelSeriesEngine3.exe"
     ]
@@ -186,6 +174,11 @@ def launch_process(process_path, arguments=None):
         return False
         
     try:
+        if not arguments:
+            os.startfile(process_path)
+            logger.info(f"Launched process (standard): {process_path}")
+            return True
+            
         import ctypes
         # ShellExecuteW(hwnd, operation, file, parameters, directory, show_cmd)
         

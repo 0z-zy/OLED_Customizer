@@ -28,7 +28,7 @@ from src.utils import fetch_app_data_path
 
 
 
-def setup_logging():
+def setup_logging(debug=False):
     try:
         app_data_path = fetch_app_data_path()
         if not path.exists(app_data_path):
@@ -36,12 +36,14 @@ def setup_logging():
         
         log_file = path.join(app_data_path, "debug.log")
         
+        level = logging.DEBUG if debug else logging.INFO
+        
         handlers = [logging.FileHandler(log_file, mode='w', encoding='utf-8')]
         if sys.stdout:
             handlers.append(logging.StreamHandler(sys.stdout))
             
         logging.basicConfig(
-            level=logging.INFO,
+            level=level,
             format="[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
             handlers=handlers
@@ -74,7 +76,13 @@ FPS = 10
 
 if __name__ == "__main__":
     try:
-        setup_logging()
+        # Load preferences early to check for debug_enabled
+        from src.UserPreferences import UserPreferences
+        prefs = UserPreferences()
+        prefs.load_preferences()
+        debug_on = prefs.get_preference("debug_enabled")
+        
+        setup_logging(debug=debug_on)
         logger = logging.getLogger("OLED Customizer")
         
         # Create app data directory if it doesn't exist (redundant but safe)
@@ -129,6 +137,12 @@ if __name__ == "__main__":
         )
 
         display_manager = DisplayManager(config, FPS)
+        
+        # If debug was enabled in prefs, make sure debug_utils knows it's "enabled" 
+        # (even if it doesn't add a second handler)
+        if debug_on:
+            from src.debug_utils import toggle_debug_logging
+            toggle_debug_logging(True)
 
         display_manager.init()
         logger.info("OLED Customizer running in version %s", __version__)

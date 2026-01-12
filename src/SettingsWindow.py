@@ -9,6 +9,8 @@ import logging
 
 logger = logging.getLogger("OLED Customizer.Settings")
 from src.utils import set_startup, is_startup_enabled
+from src.updater import is_update_available, start_update_process
+import threading
 
 # --- THEME CONSTANTS ---
 class Colors:
@@ -292,9 +294,21 @@ class SettingsGUI:
         self._toggle_row(p_gen, "Show Seconds", self.vars["display_seconds"])
         self._toggle_row(p_gen, "Use Turkish Language", self.vars["use_turkish_days"])
         
-        # Spacer
+        # System
         tk.Frame(p_gen, bg=Colors.CONTENT, height=10).pack()
         self._toggle_row(p_gen, "Run on Start", self.vars["run_on_start"])
+
+        # Update Section
+        tk.Frame(p_gen, bg=Colors.CONTENT, height=20).pack()
+        self._header(p_gen, "✨ Software Update")
+        
+        self.update_btn_text = tk.StringVar(value="Check for Updates")
+        self.update_btn = tk.Button(p_gen, textvariable=self.update_btn_text, font=FONT_SUBHEADER,
+                                    bg=Colors.CARD_BG, fg=Colors.TEXT_MAIN,
+                                    activebackground=Colors.CARD_HOVER, activeforeground=Colors.TEXT_MAIN,
+                                    relief="flat", cursor="hand2", padx=20, pady=5,
+                                    command=self._check_updates)
+        self.update_btn.pack(anchor="w", padx=5)
         
         self.pages["General"] = p_gen
         
@@ -492,6 +506,24 @@ class SettingsGUI:
                              bg=Colors.INPUT_BG, fg=Colors.TEXT_MAIN,
                              relief="flat", cursor="hand2", command=pick)
         pick_btn.pack(side="right", padx=5)
+
+    def _check_updates(self):
+        def worker():
+            self.update_btn.configure(state="disabled")
+            self.update_btn_text.set("Checking...")
+            
+            available, latest = is_update_available()
+            
+            if available:
+                self.update_btn_text.set(f"Update to v{latest}")
+                self.update_btn.configure(state="normal", bg=Colors.ACCENT_PRIMARY, fg="black", 
+                                          command=lambda: threading.Thread(target=start_update_process, daemon=True).start())
+            else:
+                self.update_btn_text.set("Up to Date")
+                self.root.after(3000, lambda: [self.update_btn_text.set("Check for Updates"), 
+                                              self.update_btn.configure(state="normal")])
+        
+        threading.Thread(target=worker, daemon=True).start()
 
     def _save_all(self):
         try:

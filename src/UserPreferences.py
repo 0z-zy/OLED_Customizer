@@ -22,8 +22,8 @@ class UserPreferences:
         "extended_font": True,
         "display_timer": True,
         "display_player": True,
-        "display_player": True,
         "display_hw_monitor": False,
+        "debug_enabled": False,
         "use_turkish_days": False,
         "clock_style": "Standard",
         "hotkey_monitor": "Key.insert",
@@ -35,7 +35,6 @@ class UserPreferences:
         "scrollbar_padding": 2,
         "text_padding_left": 30,
         "width": 128,
-        "height": 40,
         "height": 40,
         "auto_launch_gg": False,
         "player_style": "Standard"

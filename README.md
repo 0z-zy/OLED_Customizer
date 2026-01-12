@@ -2,19 +2,11 @@
 
 **The ultimate music and system dashboard for your SteelSeries Keyboard.**
 
-![Version](https://img.shields.io/badge/version-1.2.15-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-1.2.17-blue?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey?style=for-the-badge)
 
 OLED Customizer transforms your keyboard's small screen into a powerful, high-contrast information hub. Whether it's tracking your rhythm on Spotify/YouTube or monitoring your PC's vitals during a gaming session, OLED Customizer does it with style and zero flicker.
-
----
-
-## ☕ Support the Project
-
-If you find OLED Customizer useful and want to support its development, you can buy me a coffee!
-
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Donate-orange?style=for-the-badge&logo=buy-me-a-coffee)](https://buymeacoffee.com/ozzy_/)
 
 ---
 

@@ -12,20 +12,30 @@ def toggle_debug_logging(enabled: bool):
     if enabled:
         if file_handler: return # Already enabled
         
-        log_path = fetch_app_data_path("debug.log")
-        formatter = logging.Formatter("[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s")
+        # Check if root logger already has a FileHandler for debug.log
+        existing_handler = None
+        for h in root_logger.handlers:
+            if isinstance(h, logging.FileHandler) and "debug.log" in str(h.baseFilename):
+                existing_handler = h
+                break
         
-        file_handler = logging.FileHandler(log_path, mode='a', encoding='utf-8')
-        file_handler.setFormatter(formatter)
+        if existing_handler:
+            file_handler = existing_handler
+        else:
+            log_path = fetch_app_data_path("debug.log")
+            formatter = logging.Formatter("[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s")
+            file_handler = logging.FileHandler(log_path, mode='a', encoding='utf-8')
+            file_handler.setFormatter(formatter)
+            root_logger.addHandler(file_handler)
+
         file_handler.setLevel(logging.DEBUG)
-        
-        root_logger.addHandler(file_handler)
         root_logger.setLevel(logging.DEBUG)
-        logger.info(f"Debug logging enabled. File: {log_path}")
+        logger.info(f"Debug logging enabled.")
     else:
         if file_handler:
             logger.info("Debug logging disabled.")
-            root_logger.removeHandler(file_handler)
+            if file_handler in root_logger.handlers:
+                root_logger.removeHandler(file_handler)
             file_handler.close()
             file_handler = None
             

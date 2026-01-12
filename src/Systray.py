@@ -11,6 +11,7 @@ from src.image_utils import fetch_content_path
 from src.image_utils import fetch_content_path
 from src.utils import fetch_app_data_path, set_startup, is_startup_enabled
 from src.debug_utils import toggle_debug_logging, is_debug_enabled
+from src.updater import is_update_available, start_update_process
 
 logger = logging.getLogger("Systray")
 systray_thread = None
@@ -118,11 +119,36 @@ def toggle_startup(icon):
     # But usage of checked=lambda calls the function every time the menu is shown.
     pass
     
+def self_update_logic():
+    available, latest = is_update_available()
+    if available:
+        start_update_process()
+    else:
+        import tkinter as tk
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showinfo("Update", "Already up to date!")
+        root.destroy()
+
 def toggle_debug(icon):
     enable = not is_debug_enabled()
     toggle_debug_logging(enable)
-    # Icon update isn't strictly necessary for checkbox lambda but good practice
-    pass
+    
+    # Save to preferences
+    if hasattr(icon, "manager"):
+        icon.manager.user_preferences.preferences["debug_enabled"] = enable
+        icon.manager.user_preferences.save_preferences()
+    
+    icon.update_menu()
+
+def get_update_label(item):
+    # This might be slow if called every time the menu is opened.
+    # But usually pystray calls it only when showing.
+    # To avoid lag, we should cache this result.
+    if not hasattr(get_update_label, "_cached_label"):
+        get_update_label._cached_label = "✨ Check updates"
+    return get_update_label._cached_label
 
 def run_systray_async(display_manager):
     global systray_thread
@@ -238,6 +264,10 @@ def run_systray_async(display_manager):
                 args=(display_manager.user_preferences, display_manager.update_preferences),
                 daemon=True
             ).start()
+        ),
+        Item(
+            get_update_label,
+            lambda icon: __import__("threading").Thread(target=self_update_logic, daemon=True).start()
         ),
         Menu.SEPARATOR,
         Item("Exit", exit_app),
