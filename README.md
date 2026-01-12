@@ -2,7 +2,7 @@
 
 **The ultimate music and system dashboard for your SteelSeries Keyboard.**
 
-![Version](https://img.shields.io/badge/version-1.2.17-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-1.2.18-blue?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey?style=for-the-badge)
 
