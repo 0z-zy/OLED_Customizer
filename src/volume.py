@@ -102,7 +102,8 @@ class VolumeOverlay:
             try:
                 current = bool(self._mic_volume.GetMute())
                 self._mic_volume.SetMute(not current, None)
-                self._last_change = time()
+                if time() - self.app_start_time > 10.0:
+                    self._last_change = time()
                 logger.info(f"Toggled System Mic Mute to {not current}")
                 return
             except Exception as e:
@@ -112,7 +113,9 @@ class VolumeOverlay:
         if self._last_mic_mute is None:
             self._last_mic_mute = False
         self._last_mic_mute = not self._last_mic_mute
-        self._last_change = time()
+        
+        if time() - self.app_start_time > 10.0:
+            self._last_change = time()
         logger.info(f"Discord mode: Mic mute overlay = {self._last_mic_mute}")
 
     def _check_discord(self):
