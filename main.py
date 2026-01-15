@@ -1,4 +1,5 @@
 import logging
+import logging.handlers
 from psutil import pid_exists
 import os
 from os import getpid, path, makedirs, remove
@@ -7,8 +8,8 @@ import sys
 import psutil
 import time
 import asyncio
-import sys
 import traceback
+import faulthandler
 
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -38,7 +39,16 @@ def setup_logging(debug=False):
         
         level = logging.DEBUG if debug else logging.INFO
         
-        handlers = [logging.FileHandler(log_file, mode='w', encoding='utf-8')]
+        # Use RotatingFileHandler to prevent massive log files (max 2MB, keep 2 backups)
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file, mode='a', maxBytes=2*1024*1024, backupCount=2, encoding='utf-8'
+        )
+        file_handler.setFormatter(logging.Formatter(
+            "[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
+        ))
+        
+        handlers = [file_handler]
         if sys.stdout:
             handlers.append(logging.StreamHandler(sys.stdout))
             
@@ -48,6 +58,17 @@ def setup_logging(debug=False):
             datefmt="%Y-%m-%d %H:%M:%S",
             handlers=handlers
         )
+        
+        # IMPORTANT: Silence noisy loggers that flood the debug log
+        # urllib3 logs every HTTP request at DEBUG level (~3/sec = 20MB in 8 hours)
+        logging.getLogger("urllib3").setLevel(logging.WARNING)
+        logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
+        logging.getLogger("requests").setLevel(logging.WARNING)
+        
+        # Also silence charset_normalizer and other noisy libs
+        logging.getLogger("charset_normalizer").setLevel(logging.WARNING)
+        logging.getLogger("PIL").setLevel(logging.WARNING)
+        
     except Exception as e:
         # If logging fails effectively, we are in trouble. Try to write to a local fallback file?
         pass
@@ -76,6 +97,17 @@ FPS = 10
 
 if __name__ == "__main__":
     try:
+        # Enable faulthandler to catch crashes from COM/WinRT/pythonnet
+        # These can cause hard crashes that bypass Python's exception handler
+        fault_log_path = None
+        try:
+            from src.utils import fetch_app_data_path as _fap
+            fault_log_path = path.join(_fap(), "fault.log")
+            fault_file = open(fault_log_path, 'a')
+            faulthandler.enable(file=fault_file)
+        except:
+            faulthandler.enable()  # Fallback to stderr
+        
         # Load preferences early to check for debug_enabled
         from src.UserPreferences import UserPreferences
         prefs = UserPreferences()

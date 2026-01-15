@@ -1,7 +1,5 @@
 from threading import Thread
 from time import sleep, time
-from tkinter import messagebox
-import tkinter as tk
 import logging
 
 from src.SpotifyAPI import SpotifyAPI
@@ -517,15 +515,7 @@ class DisplayManager:
             return
 
         self.update_preferences()
-        logger.info("Configuration updated")
-
-        def tk_popup():
-            root = tk.Tk()
-            root.withdraw()
-            messagebox.showinfo("Info", "Configuration successfully updated")
-            root.destroy()
-
-        Thread(target=tk_popup, daemon=True).start()
+        logger.info("Configuration updated successfully")
 
     def _poll_smtc_loop(self):
         """Background thread that polls SMTC every 200ms using a persistent event loop."""
@@ -553,7 +543,14 @@ class DisplayManager:
                 
                 await asyncio.sleep(0.2)
 
-        try:
-            asyncio.run(runner())
-        except Exception as e:
-            logger.error(f"SMTC loop crashed: {e}")
+        # Keep restarting the loop if it crashes (SMTC/WinRT can be unstable)
+        while True:
+            try:
+                asyncio.run(runner())
+            except Exception as e:
+                logger.error(f"SMTC loop crashed, restarting in 2s: {e}")
+                import time as _time
+                _time.sleep(2)
+                # Reset manager to force re-init
+                self.windows_media.manager = None
+

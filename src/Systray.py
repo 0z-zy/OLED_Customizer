@@ -124,12 +124,7 @@ def self_update_logic():
     if available:
         start_update_process()
     else:
-        import tkinter as tk
-        from tkinter import messagebox
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showinfo("Update", "Already up to date!")
-        root.destroy()
+        logger.info("Update check: Already up to date!")
 
 def toggle_debug(icon):
     enable = not is_debug_enabled()

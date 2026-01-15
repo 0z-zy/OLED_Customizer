@@ -159,6 +159,13 @@ class VolumeOverlay:
                     changed = True
             except Exception as e:
                 logger.debug(f"Speaker update failed: {e}")
+                # Try to re-init speaker (device may have changed)
+                try:
+                    device = AudioUtilities.GetSpeakers()
+                    self._volume = device.EndpointVolume.QueryInterface(IAudioEndpointVolume)
+                    logger.warning("Re-initialized speaker interface after failure")
+                except:
+                    self._volume = None
                 
         # Check Mic
         if self._mic_volume:
@@ -172,6 +179,16 @@ class VolumeOverlay:
                     changed = True
             except Exception as e:
                 logger.debug(f"Mic update failed: {e}")
+                # Try to re-init mic (device may have changed)
+                try:
+                    from pycaw.pycaw import AudioUtilities as AU
+                    devices = AU.GetMicrophone()
+                    if devices:
+                        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                        self._mic_volume = cast(interface, POINTER(IAudioEndpointVolume))
+                        logger.warning("Re-initialized microphone interface after failure")
+                except:
+                    self._mic_volume = None
         
         if changed:
             # Shield against startup flicker - wait 4 seconds before allowing overlay to show
