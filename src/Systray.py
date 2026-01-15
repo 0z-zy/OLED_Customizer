@@ -8,10 +8,10 @@ from PIL import Image
 from pystray import MenuItem as Item, Icon, Menu
 
 from src.image_utils import fetch_content_path
-from src.image_utils import fetch_content_path
 from src.utils import fetch_app_data_path, set_startup, is_startup_enabled
 from src.debug_utils import toggle_debug_logging, is_debug_enabled
 from src.updater import is_update_available, start_update_process
+from src import ProfileBackup
 
 logger = logging.getLogger("Systray")
 systray_thread = None
@@ -138,12 +138,54 @@ def toggle_debug(icon):
     icon.update_menu()
 
 def get_update_label(item):
-    # This might be slow if called every time the menu is opened.
-    # But usually pystray calls it only when showing.
-    # To avoid lag, we should cache this result.
     if not hasattr(get_update_label, "_cached_label"):
         get_update_label._cached_label = "✨ Check updates"
     return get_update_label._cached_label
+
+# ============ Profile Backup Functions ============
+
+def do_backup_profiles(icon):
+    """Backup SteelSeries profiles."""
+    result = ProfileBackup.backup_profiles()
+    if result:
+        logger.info(f"Backup successful: {result}")
+    else:
+        logger.error("Backup failed!")
+
+def do_restore_profiles(icon, backup_path):
+    """Restore SteelSeries profiles from backup."""
+    from src.utils import is_process_running
+    if is_process_running(["SteelSeriesGG.exe", "SteelSeriesEngine3.exe"]):
+        logger.error("Close SteelSeries GG before restoring!")
+        return
+    
+    if ProfileBackup.restore_profiles(backup_path):
+        logger.info("Restore complete! Restart SteelSeries GG.")
+    else:
+        logger.error("Restore failed!")
+
+def do_vacuum_databases(icon):
+    """Compact SteelSeries databases."""
+    from src.utils import is_process_running
+    if is_process_running(["SteelSeriesGG.exe", "SteelSeriesEngine3.exe"]):
+        logger.error("Close SteelSeries GG before compacting!")
+        return
+    
+    before, after = ProfileBackup.vacuum_databases()
+    saved = before - after
+    logger.info(f"Compacted databases: {before:.1f}MB -> {after:.1f}MB (saved {saved:.1f}MB)")
+
+def build_restore_menu():
+    """Build dynamic restore submenu with available backups."""
+    backups = ProfileBackup.list_backups()
+    if not backups:
+        return [Item("No backups available", None, enabled=False)]
+    
+    items = []
+    for name, path, count in backups[:10]:  # Limit to 10
+        label = f"{name} ({count} files)"
+        items.append(Item(label, lambda icon, item, p=path: Thread(target=do_restore_profiles, args=(icon, p), daemon=True).start()))
+    return items
 
 def run_systray_async(display_manager):
     global systray_thread
@@ -263,6 +305,24 @@ def run_systray_async(display_manager):
         Item(
             get_update_label,
             lambda icon: __import__("threading").Thread(target=self_update_logic, daemon=True).start()
+        ),
+        Item(
+            "💾 SteelSeries Profiles",
+            Menu(
+                Item(
+                    "Backup Now",
+                    lambda icon, item: Thread(target=do_backup_profiles, args=(icon,), daemon=True).start()
+                ),
+                Item(
+                    "Restore...",
+                    Menu(lambda: build_restore_menu())
+                ),
+                Menu.SEPARATOR,
+                Item(
+                    "Compact Databases",
+                    lambda icon, item: Thread(target=do_vacuum_databases, args=(icon,), daemon=True).start()
+                ),
+            )
         ),
         Menu.SEPARATOR,
         Item("Exit", exit_app),
