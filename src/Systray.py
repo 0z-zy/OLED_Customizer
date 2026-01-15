@@ -184,7 +184,12 @@ def build_restore_menu():
     items = []
     for name, path, count in backups[:10]:  # Limit to 10
         label = f"{name} ({count} files)"
-        items.append(Item(label, lambda icon, item, p=path: Thread(target=do_restore_profiles, args=(icon, p), daemon=True).start()))
+        # Create a closure to capture path correctly
+        def make_restore_action(backup_path):
+            def action(icon, item):
+                Thread(target=do_restore_profiles, args=(icon, backup_path), daemon=True).start()
+            return action
+        items.append(Item(label, make_restore_action(path)))
     return items
 
 def run_systray_async(display_manager):
