@@ -239,26 +239,30 @@ class DisplayManager:
                 continue
 
             # Check if SteelSeries GG is running
-            gg_running = is_process_running(["SteelSeriesGG.exe", "SteelSeriesEngine3.exe"])
+            gg_running = is_process_running(["SteelSeriesGG.exe", "SteelSeriesGGClient.exe", "SteelSeriesEngine3.exe"])
             
             if not gg_running:
                  self._gg_was_running = False
+                 logger.debug(f"GG not running. auto_launch_gg={self.auto_launch_gg}")
                  
                  # Auto-launch logic
                  if self.auto_launch_gg:
                      now_sec = time()
-                     if now_sec - self._last_launch_attempt > 60: # Limit attempts to once per minute
+                     time_since_last = now_sec - self._last_launch_attempt
+                     logger.debug(f"Time since last attempt: {time_since_last:.1f}s")
+                     if time_since_last > 60: # Limit attempts to once per minute
                          self._last_launch_attempt = now_sec
-                         path = find_steelseries_gg_path()
-                         if path:
+                         gg_path = find_steelseries_gg_path()
+                         logger.info(f"Found GG path: {gg_path}")
+                         if gg_path:
                              logger.info("SteelSeries GG not found. Auto-launching...")
-                             # Launch with necessary dataPath and attempt background start
-                             args = r'-dataPath="C:\ProgramData\SteelSeries\GG" -minimized'
-                             launch_process(path, args)
+                             # Launch with same args as official shortcut
+                             args = r'-dataPath="C:\ProgramData\SteelSeries\GG" -dbEnv=production'
+                             result = launch_process(gg_path, args, minimized=True)
+                             logger.info(f"Launch result: {result}")
                              sleep(15) # Wait for it to start
                          else:
-                             # logger.warning("Auto-launch enabled but SteelSeries GG path not found.")
-                             pass
+                             logger.warning("Auto-launch enabled but SteelSeries GG path not found.")
 
                  sleep(2) 
                  continue

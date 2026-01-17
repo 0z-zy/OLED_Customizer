@@ -152,9 +152,7 @@ def find_steelseries_gg_path():
     """
     common_paths = [
         r"C:\Program Files\SteelSeries\GG\SteelSeriesGG.exe",
-        r"C:\Program Files\SteelSeries\GG\SteelSeriesGGClient.exe",
         r"C:\Program Files (x86)\SteelSeries\GG\SteelSeriesGG.exe",
-        r"C:\Program Files (x86)\SteelSeries\GG\SteelSeriesGGClient.exe",
         r"C:\Program Files\SteelSeries\SteelSeries Engine 3\SteelSeriesEngine3.exe",
         r"C:\Program Files (x86)\SteelSeries\SteelSeries Engine 3\SteelSeriesEngine3.exe"
     ]
@@ -165,10 +163,11 @@ def find_steelseries_gg_path():
             
     return None
 
-def launch_process(process_path, arguments=None):
+def launch_process(process_path, arguments=None, minimized=False):
     """
     Launches a process from the given path non-blocking.
     Uses ShellExecute to handle UAC elevation if required (WinError 740).
+    If minimized=True, starts the window minimized.
     """
     if not process_path or not path.exists(process_path):
         return False
@@ -181,13 +180,15 @@ def launch_process(process_path, arguments=None):
             
         import ctypes
         # ShellExecuteW(hwnd, operation, file, parameters, directory, show_cmd)
+        # SW_SHOWNORMAL = 1 (SW_HIDE/SW_SHOWMINIMIZED don't work with SteelSeries GG)
+        show_cmd = 1
         
         directory = path.dirname(process_path)
-        ret = ctypes.windll.shell32.ShellExecuteW(None, "open", process_path, arguments, directory, 1)
+        ret = ctypes.windll.shell32.ShellExecuteW(None, "open", process_path, arguments, directory, show_cmd)
         
         # Returns > 32 on success
         if ret > 32:
-            logger.info(f"Launched process: {process_path} args={arguments}")
+            logger.info(f"Launched process: {process_path} args={arguments} minimized={minimized}")
             return True
         else:
             logger.error(f"ShellExecute failed with code {ret} for {process_path}")
