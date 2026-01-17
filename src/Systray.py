@@ -153,66 +153,96 @@ def do_backup_profiles(icon):
         logger.error("Backup failed!")
 
 def do_restore_profiles(icon, backup_path):
-    """Restore SteelSeries profiles from backup. Auto-closes and reopens GG."""
+    """
+    Restore SteelSeries profiles from backup.
+    SAFE VERSION: Requires user to manually close GG first.
+    """
     import time
+    import ctypes
     logger.info(f"do_restore_profiles called with path: {backup_path}")
-    from src.utils import is_process_running, find_steelseries_gg_path, launch_process
-    import psutil
+    from src.utils import is_process_running
     
-    gg_was_running = False
-    gg_processes = ["SteelSeriesGG.exe", "SteelSeriesGGClient.exe", "SteelSeriesEngine3.exe"]
+    # MessageBox constants
+    MB_OK = 0x00
+    MB_OKCANCEL = 0x01
+    MB_YESNO = 0x04
+    MB_ICONWARNING = 0x30
+    MB_ICONERROR = 0x10
+    MB_ICONINFO = 0x40
+    IDOK = 1
+    IDCANCEL = 2
+    IDYES = 6
+    IDNO = 7
     
-    # Check if GG is running and close it if so
+    gg_processes = ["SteelSeriesGG.exe", "SteelSeriesGGClient.exe", "SteelSeriesEngine3.exe", 
+                    "SteelSeriesEngine.exe", "SteelSeriesPrism.exe", "SteelSeriesSonar.exe"]
+    
+    # Step 1: Check if GG is running - if so, ask user to close it
     if is_process_running(gg_processes):
-        logger.info("SteelSeries GG is running, closing it for restore...")
-        gg_was_running = True
+        result = ctypes.windll.user32.MessageBoxW(
+            0,
+            "SteelSeries GG must be COMPLETELY closed before restoring.\n\n"
+            "Please:\n"
+            "1. Right-click SteelSeries GG in system tray\n"
+            "2. Click 'Quit SteelSeries GG'\n"
+            "3. Wait a few seconds\n"
+            "4. Try restore again\n\n"
+            "Click OK after you've closed SteelSeries GG.",
+            "Close SteelSeries GG First",
+            MB_OKCANCEL | MB_ICONWARNING
+        )
+        if result != IDOK:
+            logger.info("User cancelled restore")
+            return
         
-        # Kill all GG processes
-        for proc in psutil.process_iter(['name']):
-            try:
-                if proc.info['name'] in gg_processes:
-                    logger.info(f"Terminating {proc.info['name']} (PID {proc.pid})")
-                    proc.terminate()
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-        
-        # Wait for processes to close
-        time.sleep(3)
-        
-        # Force kill if still running
+        # Check again after user says OK
+        time.sleep(2)
         if is_process_running(gg_processes):
-            logger.warning("GG still running, force killing...")
-            for proc in psutil.process_iter(['name']):
-                try:
-                    if proc.info['name'] in gg_processes:
-                        proc.kill()
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-            time.sleep(2)
+            ctypes.windll.user32.MessageBoxW(
+                0,
+                "SteelSeries GG is still running!\n\n"
+                "Make sure to quit it completely from the system tray.\n"
+                "Restore cancelled.",
+                "Still Running",
+                MB_OK | MB_ICONERROR
+            )
+            logger.error("GG still running after user prompt, aborting restore")
+            return
     
-    # Perform the restore
+    # Step 2: Confirm restore
+    result = ctypes.windll.user32.MessageBoxW(
+        0,
+        f"Ready to restore from:\n{backup_path}\n\n"
+        "A safety backup of your current settings will be created first.\n\n"
+        "Proceed with restore?",
+        "Confirm Restore",
+        MB_YESNO | MB_ICONWARNING
+    )
+    if result != IDYES:
+        logger.info("User cancelled restore confirmation")
+        return
+    
+    # Step 3: Perform the restore
     if ProfileBackup.restore_profiles(backup_path):
         logger.info("Restore complete!")
-        
-        # Reopen GG if it was running before
-        if gg_was_running:
-            gg_path = find_steelseries_gg_path()
-            if gg_path:
-                logger.info("Reopening SteelSeries GG...")
-                time.sleep(1)
-                args = r'-dataPath="C:\ProgramData\SteelSeries\GG" -dbEnv=production'
-                launch_process(gg_path, args, minimized=True)
-            else:
-                logger.warning("Could not find SteelSeries GG path to reopen")
+        ctypes.windll.user32.MessageBoxW(
+            0,
+            "Restore complete!\n\n"
+            "You can now start SteelSeries GG.\n"
+            "(It will NOT auto-start to ensure clean database load)",
+            "Restore Successful",
+            MB_OK | MB_ICONINFO
+        )
     else:
         logger.error("Restore failed!")
-        # Still try to reopen GG if we closed it
-        if gg_was_running:
-            gg_path = find_steelseries_gg_path()
-            if gg_path:
-                logger.info("Reopening SteelSeries GG despite failure...")
-                args = r'-dataPath="C:\ProgramData\SteelSeries\GG" -dbEnv=production'
-                launch_process(gg_path, args, minimized=True)
+        ctypes.windll.user32.MessageBoxW(
+            0,
+            "Restore failed!\n\n"
+            "Check the logs for details.\n"
+            "Your original settings were backed up before the attempt.",
+            "Restore Failed",
+            MB_OK | MB_ICONERROR
+        )
 
 def do_vacuum_databases(icon):
     """Compact SteelSeries databases."""
@@ -373,9 +403,8 @@ def run_systray_async(display_manager):
                     lambda icon, item: Thread(target=do_backup_profiles, args=(icon,), daemon=True).start()
                 ),
                 Item(
-                    "⚠️ Restore (disabled - use manual restore)",
-                    None,
-                    enabled=False
+                    "Restore...",
+                    Menu(lambda: build_restore_menu())
                 ),
                 Menu.SEPARATOR,
                 Item(
