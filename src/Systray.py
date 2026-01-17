@@ -373,8 +373,9 @@ def run_systray_async(display_manager):
                     lambda icon, item: Thread(target=do_backup_profiles, args=(icon,), daemon=True).start()
                 ),
                 Item(
-                    "Restore...",
-                    Menu(lambda: build_restore_menu())
+                    "⚠️ Restore (disabled - use manual restore)",
+                    None,
+                    enabled=False
                 ),
                 Menu.SEPARATOR,
                 Item(
