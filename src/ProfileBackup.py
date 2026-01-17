@@ -112,6 +112,7 @@ def restore_profiles(backup_path: str) -> bool:
     """
     Restore SteelSeries profiles from a backup.
     
+    SAFETY: Creates a backup of current databases before restoring!
     Note: Caller should ensure SteelSeries GG is closed before calling.
     
     Args:
@@ -125,6 +126,38 @@ def restore_profiles(backup_path: str) -> bool:
         return False
     
     try:
+        # SAFETY: Create a backup of current databases BEFORE restoring
+        logger.info("Creating safety backup before restore...")
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        safety_backup_dir = os.path.join(get_backup_dir(), f"pre_restore_{timestamp}")
+        os.makedirs(safety_backup_dir, exist_ok=True)
+        
+        for name, db_path in DATABASES.items():
+            if os.path.exists(db_path):
+                dest = os.path.join(safety_backup_dir, f"{name}_database.db")
+                shutil.copy2(db_path, dest)
+                logger.info(f"Safety backup: {name} -> {dest}")
+        
+        logger.info(f"Safety backup created: {safety_backup_dir}")
+        
+        # Clean up WAL/SHM files (these contain uncommitted transactions)
+        for name, db_path in DATABASES.items():
+            wal_path = db_path + "-wal"
+            shm_path = db_path + "-shm"
+            if os.path.exists(wal_path):
+                try:
+                    os.remove(wal_path)
+                    logger.info(f"Removed WAL file: {wal_path}")
+                except Exception as e:
+                    logger.warning(f"Could not remove WAL file {wal_path}: {e}")
+            if os.path.exists(shm_path):
+                try:
+                    os.remove(shm_path)
+                    logger.info(f"Removed SHM file: {shm_path}")
+                except Exception as e:
+                    logger.warning(f"Could not remove SHM file {shm_path}: {e}")
+        
+        # Now restore from backup
         restored = 0
         for name, db_path in DATABASES.items():
             backup_file = os.path.join(backup_path, f"{name}_database.db")
@@ -140,6 +173,7 @@ def restore_profiles(backup_path: str) -> bool:
             return False
         
         logger.info(f"Restore complete! Restored {restored} databases.")
+        logger.info(f"If something went wrong, you can restore from: {safety_backup_dir}")
         return True
         
     except Exception as e:
