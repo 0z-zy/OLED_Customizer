@@ -153,16 +153,66 @@ def do_backup_profiles(icon):
         logger.error("Backup failed!")
 
 def do_restore_profiles(icon, backup_path):
-    """Restore SteelSeries profiles from backup."""
-    from src.utils import is_process_running
-    if is_process_running(["SteelSeriesGG.exe", "SteelSeriesEngine3.exe"]):
-        logger.error("Close SteelSeries GG before restoring!")
-        return
+    """Restore SteelSeries profiles from backup. Auto-closes and reopens GG."""
+    import time
+    logger.info(f"do_restore_profiles called with path: {backup_path}")
+    from src.utils import is_process_running, find_steelseries_gg_path, launch_process
+    import psutil
     
+    gg_was_running = False
+    gg_processes = ["SteelSeriesGG.exe", "SteelSeriesGGClient.exe", "SteelSeriesEngine3.exe"]
+    
+    # Check if GG is running and close it if so
+    if is_process_running(gg_processes):
+        logger.info("SteelSeries GG is running, closing it for restore...")
+        gg_was_running = True
+        
+        # Kill all GG processes
+        for proc in psutil.process_iter(['name']):
+            try:
+                if proc.info['name'] in gg_processes:
+                    logger.info(f"Terminating {proc.info['name']} (PID {proc.pid})")
+                    proc.terminate()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        
+        # Wait for processes to close
+        time.sleep(3)
+        
+        # Force kill if still running
+        if is_process_running(gg_processes):
+            logger.warning("GG still running, force killing...")
+            for proc in psutil.process_iter(['name']):
+                try:
+                    if proc.info['name'] in gg_processes:
+                        proc.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            time.sleep(2)
+    
+    # Perform the restore
     if ProfileBackup.restore_profiles(backup_path):
-        logger.info("Restore complete! Restart SteelSeries GG.")
+        logger.info("Restore complete!")
+        
+        # Reopen GG if it was running before
+        if gg_was_running:
+            gg_path = find_steelseries_gg_path()
+            if gg_path:
+                logger.info("Reopening SteelSeries GG...")
+                time.sleep(1)
+                args = r'-dataPath="C:\ProgramData\SteelSeries\GG" -dbEnv=production'
+                launch_process(gg_path, args, minimized=True)
+            else:
+                logger.warning("Could not find SteelSeries GG path to reopen")
     else:
         logger.error("Restore failed!")
+        # Still try to reopen GG if we closed it
+        if gg_was_running:
+            gg_path = find_steelseries_gg_path()
+            if gg_path:
+                logger.info("Reopening SteelSeries GG despite failure...")
+                args = r'-dataPath="C:\ProgramData\SteelSeries\GG" -dbEnv=production'
+                launch_process(gg_path, args, minimized=True)
 
 def do_vacuum_databases(icon):
     """Compact SteelSeries databases."""
@@ -177,16 +227,20 @@ def do_vacuum_databases(icon):
 
 def build_restore_menu():
     """Build dynamic restore submenu with available backups."""
+    logger.debug("Building restore menu...")
     backups = ProfileBackup.list_backups()
+    logger.debug(f"Found {len(backups)} backups")
     if not backups:
         return [Item("No backups available", None, enabled=False)]
     
     items = []
     for name, path, count in backups[:10]:  # Limit to 10
         label = f"{name} ({count} files)"
+        logger.debug(f"Adding restore option: {label} -> {path}")
         # Create a closure to capture path correctly
         def make_restore_action(backup_path):
             def action(icon, item):
+                logger.info(f"Restore action triggered for: {backup_path}")
                 Thread(target=do_restore_profiles, args=(icon, backup_path), daemon=True).start()
             return action
         items.append(Item(label, make_restore_action(path)))

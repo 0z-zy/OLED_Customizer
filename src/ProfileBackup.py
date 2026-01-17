@@ -112,7 +112,7 @@ def restore_profiles(backup_path: str) -> bool:
     """
     Restore SteelSeries profiles from a backup.
     
-    IMPORTANT: SteelSeries GG must be stopped before restoring!
+    Note: Caller should ensure SteelSeries GG is closed before calling.
     
     Args:
         backup_path: Path to the backup folder.
@@ -122,12 +122,6 @@ def restore_profiles(backup_path: str) -> bool:
     """
     if not os.path.exists(backup_path):
         logger.error(f"Backup not found: {backup_path}")
-        return False
-    
-    # Check if GG is running
-    from src.utils import is_process_running
-    if is_process_running(["SteelSeriesGG.exe", "SteelSeriesEngine3.exe"]):
-        logger.error("SteelSeries GG is running! Please close it before restoring.")
         return False
     
     try:
