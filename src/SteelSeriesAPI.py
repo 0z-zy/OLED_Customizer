@@ -20,6 +20,9 @@ class SteelSeriesAPI:
             path.join(programdata, "SteelSeries", "SteelSeries GG", "coreProps.json"),
         ]
         self.address = ""
+        # Use persistent Session to reduce object churn and prevent GC crashes
+        self._session = requests.Session()
+        self._session.headers.update({"Connection": "keep-alive"})
         self.retrieve_address()
 
     def retrieve_address(self):
@@ -121,10 +124,9 @@ class SteelSeriesAPI:
 
     def send_data(self, endpoint, data):
         try:
-            response = requests.post(
+            response = self._session.post(
                 self.address + endpoint,
                 json=data,
-                headers={"Connection": "close"},
                 timeout=0.25
             )
             if response.status_code != 200:
