@@ -146,7 +146,9 @@ class SpotifyAPI:
     def save_token(self):
         """Save current token to credentials.json."""
         try:
-            with open(fetch_app_data_path("credentials.json"), "w") as f:
+            cred_path = fetch_app_data_path("credentials.json")
+            os.makedirs(os.path.dirname(cred_path), exist_ok=True)
+            with open(cred_path, "w") as f:
                 f.write(dumps({
                     "token": self.token,
                     "refresh_token": self.refresh_token,

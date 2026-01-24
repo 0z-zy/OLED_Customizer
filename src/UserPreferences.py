@@ -1,4 +1,4 @@
-from os import path, getenv
+from os import path, getenv, makedirs
 from json import loads, dumps
 
 import logging
@@ -76,6 +76,8 @@ class UserPreferences:
         return True
 
     def save_preferences(self):
+        # Ensure the directory exists before writing
+        makedirs(path.dirname(self.config_path), exist_ok=True)
         with open(self.config_path, "w") as file:
             file.write(dumps(self.preferences, indent=4))
 

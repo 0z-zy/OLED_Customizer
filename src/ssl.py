@@ -1,5 +1,6 @@
 from OpenSSL import crypto
 from src.utils import fetch_app_data_path
+import os
 
 import logging
 
@@ -12,6 +13,9 @@ It saves the certificate and key to the specified paths in the app data director
 def generate_cert():
     cert_file = fetch_app_data_path('cert.pem')
     key_file = fetch_app_data_path('key.pem')
+    
+    # Ensure the directory exists
+    os.makedirs(os.path.dirname(cert_file), exist_ok=True)
 
     # Private key generation
     key = crypto.PKey()
@@ -42,3 +46,4 @@ def generate_cert():
         f.write(crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
 
     logger.info("Certificate and key generated at %s and %s", cert_file, key_file)
+
