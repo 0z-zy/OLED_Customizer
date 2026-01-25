@@ -12,10 +12,10 @@ OLED Customizer transforms your keyboard's small screen into a powerful, high-co
 
 ## 📋 Table of Contents
 - [🚀 Key Highlights](#-key-highlights)
+- [🎨 Advanced Customization](#-advanced-customization)
 - [🛠️ Quick Setup](#️-quick-setup)
 - [🎵 Spotify API Setup](#-spotify-api-setup)
 - [🌐 Browser Sync](#-browser-sync-installation)
-- [🎨 Advanced Customization](#-advanced-customization)
 - [📚 Acknowledgments](#-acknowledgments)
 
 ---
@@ -45,6 +45,25 @@ OLED Customizer transforms your keyboard's small screen into a powerful, high-co
 *   **Global Mute**: Press **PAUSE** to mute your system mic and see status update instantly.
 
 ![Volume Demo](content/demos/demo_volume.gif)
+
+---
+
+## 🎨 Advanced Customization
+
+Access `%APPDATA%/OLED Customizer/config.json` or use the **Settings GUI** to adjust:
+
+- **Clock Designs**: Analog, Big Timer, Date Focused, and more.
+- **Scrollbar Margin**: Adjusts the horizontal width and padding.
+- **Text Indentation**: Shifts titles to avoid overlapping app icons.
+
+### 🕰️ Clock Gallery
+
+| Style | Preview |
+| :--- | :--- |
+| **Standard** | ![Standard](content/demos/demo_clock.gif) |
+| **Analog** | ![Analog](content/demos/demo_clock_analog.gif) |
+| **Big Timer** | ![Big](content/demos/demo_clock_big.gif) |
+| **Date Focused** | ![Date](content/demos/demo_clock_date.gif) |
 
 ---
 
@@ -97,25 +116,6 @@ To get high-precision data from YouTube and other web players:
 
 > [!NOTE]
 > Browser Sync bypasses Windows SMTC limitations, providing accurate progress bars for YouTube videos.
-
----
-
-## 🎨 Advanced Customization
-
-Access `%APPDATA%/OLED Customizer/config.json` or use the **Settings GUI** to adjust:
-
-- **Clock Designs**: Analog, Big Timer, Date Focused, and more.
-- **Scrollbar Margin**: Adjusts the horizontal width and padding.
-- **Text Indentation**: Shifts titles to avoid overlapping app icons.
-
-### 🕰️ Clock Gallery
-
-| Style | Preview |
-| :--- | :--- |
-| **Standard** | ![Standard](content/demos/demo_clock.gif) |
-| **Analog** | ![Analog](content/demos/demo_clock_analog.gif) |
-| **Big Timer** | ![Big](content/demos/demo_clock_big.gif) |
-| **Date Focused** | ![Date](content/demos/demo_clock_date.gif) |
 
 ---
 
