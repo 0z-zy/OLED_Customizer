@@ -102,11 +102,18 @@ if __name__ == "__main__":
         fault_log_path = None
         try:
             from src.utils import fetch_app_data_path as _fap
-            fault_log_path = path.join(_fap(), "fault.log")
+            app_data_dir = _fap()
+            # Ensure directory exists BEFORE trying to open fault.log
+            if not path.exists(app_data_dir):
+                makedirs(app_data_dir)
+            fault_log_path = path.join(app_data_dir, "fault.log")
             fault_file = open(fault_log_path, 'a')
             faulthandler.enable(file=fault_file)
-        except:
-            faulthandler.enable()  # Fallback to stderr
+        except Exception:
+            # Fallback to stderr only if it exists (not None in frozen apps)
+            if sys.stderr is not None:
+                faulthandler.enable()
+            # Otherwise just skip faulthandler - better than crashing
         
         # Load preferences early to check for debug_enabled
         from src.UserPreferences import UserPreferences
