@@ -387,7 +387,7 @@ def run_systray_async(display_manager):
             enabled=lambda item: display_manager.enabled,
         ),
         Item(
-            "   Show Game FPS (RTSS)",
+            "Show Game FPS",
             toggle_fps,
             checked=lambda item: display_manager.user_preferences.preferences.get("show_game_fps", False),
             enabled=lambda item: display_manager.enabled,

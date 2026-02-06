@@ -95,7 +95,7 @@ class _LHMWorker:
                     
                     for sensor in hw.Sensors:
                         if sensor.Value is not None and sensor.Value > 0:
-                            key = (hw_type, str(sensor.SensorType).lower(), str(sensor.Name).lower())
+                            key = (hw_type, str(hw.Name), str(sensor.SensorType).lower(), str(sensor.Name).lower())
                             new_cache[key] = float(sensor.Value)
                             
                     # SubHardware (some GPUs)
@@ -103,7 +103,7 @@ class _LHMWorker:
                         sub.Update()
                         for sensor in sub.Sensors:
                             if sensor.Value is not None and sensor.Value > 0:
-                                key = (hw_type, str(sensor.SensorType).lower(), str(sensor.Name).lower())
+                                key = (hw_type, str(hw.Name), str(sensor.SensorType).lower(), str(sensor.Name).lower())
                                 new_cache[key] = float(sensor.Value)
                 
                 with self._cache_lock:
@@ -114,11 +114,13 @@ class _LHMWorker:
                 
             sleep(self._polling_interval / 1000.0)  # Dynamic interval
             
-    def get_sensor(self, hw_type, sensor_type, name_contains=None):
+    def get_sensor(self, hw_type, sensor_type, name_contains=None, hw_name=None):
         """Thread-safe read from cache."""
         with self._cache_lock:
-            for (hw, st, name), value in self._cache.items():
+            for (hw, hn, st, name), value in self._cache.items():
                 if hw_type.lower() not in hw:
+                    continue
+                if hw_name and hw_name.lower() != "auto" and hw_name.lower() not in hn.lower():
                     continue
                 if sensor_type.lower() not in st:
                     continue
@@ -126,6 +128,15 @@ class _LHMWorker:
                     continue
                 return value
         return None
+
+    def get_available_gpus(self):
+        """Return list of detected GPU names."""
+        gpus = set()
+        with self._cache_lock:
+            for (hw, hn, st, name) in self._cache.keys():
+                if "gpu" in hw:
+                    gpus.add(hn)
+        return sorted(list(gpus))
 
 
 # Global worker instance
@@ -195,7 +206,11 @@ class HardwareMonitor:
 
     def _get_lhm_sensor(self, hw_type, sensor_type, name_contains=None):
         """Get value from LHM worker cache (thread-safe)."""
-        return _lhm_worker.get_sensor(hw_type, sensor_type, name_contains)
+        selected_gpu = self.preferences.get_preference("selected_gpu") or "Auto"
+        return _lhm_worker.get_sensor(hw_type, sensor_type, name_contains, hw_name=selected_gpu if hw_type.lower() == "gpu" else None)
+
+    def get_available_gpus(self):
+        return _lhm_worker.get_available_gpus()
 
     def _get_wmi_cpu_temp(self):
         """Fallback CPU temp from WMI."""

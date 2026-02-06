@@ -288,6 +288,7 @@ class SettingsGUI:
         # HW Monitoring
         self.vars["hw_polling_interval"] = tk.StringVar(value=str(self.prefs.get_preference("hw_polling_interval") or "1000"))
         self.vars["show_game_fps"] = tk.BooleanVar(value=bool(self.prefs.get_preference("show_game_fps")))
+        self.vars["selected_gpu"] = tk.StringVar(value=self.prefs.get_preference("selected_gpu") or "Auto")
 
     def _create_pages(self):
         # -- GENERAL PAGE --
@@ -327,7 +328,14 @@ class SettingsGUI:
                           command=lambda: self._exclusive_toggle("display_hw_monitor", "display_timer"))
         
         tk.Frame(p_disp, bg=Colors.CONTENT, height=10).pack()
-        self._toggle_row(p_disp, "Show GPU FPS (Experimental)", self.vars["show_game_fps"])
+        self._toggle_row(p_disp, "Show Game FPS", self.vars["show_game_fps"])
+        
+        # GPU Selection
+        from src.HardwareMonitor import HardwareMonitor
+        # We need an instance to get GPUs or just call the worker method if accessible
+        from src.HardwareMonitor import _lhm_worker
+        available_gpus = ["Auto"] + _lhm_worker.get_available_gpus()
+        self._dropdown_row(p_disp, "Selected GPU", self.vars["selected_gpu"], available_gpus)
         
         polling_options = {"500ms": "500", "1s (Default)": "1000", "2s": "2000", "5s": "5000"}
         self._dropdown_row(p_disp, "HW Polling Rate", self.vars["hw_polling_interval"], 

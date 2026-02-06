@@ -39,7 +39,8 @@ class UserPreferences:
         "auto_launch_gg": False,
         "player_style": "Standard",
         "hw_polling_interval": 1000,
-        "show_game_fps": False
+        "show_game_fps": False,
+        "selected_gpu": "Auto"
     }
 
     def __init__(self):
