@@ -35,6 +35,7 @@ except ImportError:
 # List of assets to include
 added_files = [
     ('version.py', '.'),
+    ('src/lib/PresentMon.dll', 'src/lib'),
 ] + hw_monitor_dlls
 
 # Recursively add everything in 'content' folder
@@ -77,6 +78,7 @@ a = Analysis(
         'win32gui',
         'win32api',
         'win32con',
+        'win32process',
         'pystray',
         'asyncio',
         'winrt',

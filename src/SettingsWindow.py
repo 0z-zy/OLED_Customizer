@@ -327,7 +327,7 @@ class SettingsGUI:
                           command=lambda: self._exclusive_toggle("display_hw_monitor", "display_timer"))
         
         tk.Frame(p_disp, bg=Colors.CONTENT, height=10).pack()
-        self._toggle_row(p_disp, "Show Game FPS (needs RTSS)", self.vars["show_game_fps"])
+        self._toggle_row(p_disp, "Show GPU FPS (Experimental)", self.vars["show_game_fps"])
         
         polling_options = {"500ms": "500", "1s (Default)": "1000", "2s": "2000", "5s": "5000"}
         self._dropdown_row(p_disp, "HW Polling Rate", self.vars["hw_polling_interval"], 

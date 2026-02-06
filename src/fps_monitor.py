@@ -1,97 +1,120 @@
-import mmap
-import struct
+
+import ctypes
+import ctypes.wintypes as wintypes
+from threading import Thread, Lock
+import time
 import logging
+import win32gui
+import win32process
+import os
+import sys
 
 logger = logging.getLogger("OLED Customizer.FPSMonitor")
 
+# --- PresentMon DLL Interface ---
+class PresentMonExitCodes:
+    STATUS_OK = 0
+    GENERAL_ERROR = 1000
+    PRIVILIGIES_ERROR = 1007
+
+# We use double precision for the data from the DLL
 class FPSMonitor:
-    """
-    Reads Game FPS from RTSS (RivaTuner Statistics Server) shared memory.
-    """
-    
-    SHM_NAME = "RTSSSharedMemoryV2"
-    SHM_SIZE = 65536
-    
+    _instance = None
+    _lock = Lock()
+
+    def __new__(cls):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(FPSMonitor, cls).__new__(cls)
+                cls._instance._initialized = False
+            return cls._instance
+
     def __init__(self):
-        self._mm = None
+        if self._initialized: return
+        self._fps_value = 0
+        self._running = False
+        self._lib = None
+        self._initialized = True
         
-    def _ensure_mmap(self):
-        if self._mm:
-            return True
+        # Determine DLL path
+        if getattr(sys, 'frozen', False):
+            base_dir = sys._MEIPASS
+        else:
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            
+        self._dll_path = os.path.join(base_dir, "src", "lib", "PresentMon.dll")
+        
+        self.start()
+
+    def start(self):
+        if self._running: return
+        
+        if not os.path.exists(self._dll_path):
+            logger.error(f"FPSMonitor: DLL not found at {self._dll_path}")
+            return
+
         try:
-            # mmap.mmap(-1, ...) is for anonymous memory, but on Windows 
-            # we can use tagname to open existing named shared memory.
-            self._mm = mmap.mmap(-1, self.SHM_SIZE, tagname=self.SHM_NAME, access=mmap.ACCESS_READ)
-            return True
-        except Exception:
-            self._mm = None
-            return False
+            self._lib = ctypes.CDLL(self._dll_path)
+            
+            # Setup argtypes/restypes for PresentMon.dll
+            # int64_t StartEventRecording(int64_t pid, int64_t max_samples)
+            self._lib.StartEventRecording.restype = ctypes.c_int64
+            self._lib.StartEventRecording.argtypes = [ctypes.c_int64, ctypes.c_int64]
+            
+            # int64_t StopEventRecording()
+            self._lib.StopEventRecording.restype = ctypes.c_int64
+            
+            # int64_t GetCurrentData(int64_t num_samples, double* out_data, double* out_times, int64_t* out_size)
+            # The DLL expects: FPS, FlipRate, DeltaReady, DeltaDisplayed, TimeTaken, ScreenTime (6 doubles per sample)
+            self._lib.GetCurrentData.restype = ctypes.c_int64
+            self._lib.GetCurrentData.argtypes = [
+                ctypes.c_int64, 
+                ctypes.POINTER(ctypes.c_double), 
+                ctypes.POINTER(ctypes.c_double), 
+                ctypes.POINTER(ctypes.c_int64)
+            ]
+
+            # Start recording (pid 0 = all processes)
+            res = self._lib.StartEventRecording(0, 86400)
+            if res != PresentMonExitCodes.STATUS_OK:
+                logger.error(f"FPSMonitor: Failed to start recording (Error {res})")
+                return
+                
+            self._running = True
+            Thread(target=self._worker_loop, daemon=True, name="FPS-DLL-Worker").start()
+            logger.info("FPSMonitor: Native PresentMon logic started")
+            
+        except Exception as e:
+            logger.error(f"FPSMonitor: Failed to load/init DLL: {e}")
+
+    def _worker_loop(self):
+        # Local buffers for GetCurrentData
+        num_samples = 1
+        data_buf = (ctypes.c_double * (num_samples * 6))()
+        time_buf = (ctypes.c_double * num_samples)()
+        size_buf = (ctypes.c_int64 * 1)()
+        
+        while self._running:
+            try:
+                res = self._lib.GetCurrentData(num_samples, data_buf, time_buf, size_buf)
+                if res == PresentMonExitCodes.STATUS_OK and size_buf[0] > 0:
+                    # Index 0 is FPS
+                    with self._lock:
+                        self._fps_value = int(data_buf[0])
+                else:
+                    with self._lock:
+                        self._fps_value = 0
+            except:
+                pass
+            time.sleep(0.5)
 
     def get_fps(self) -> int:
-        """
-        Get the current average FPS from the active 3D application in RTSS.
-        """
-        if not self._ensure_mmap():
-            return 0
-            
-        try:
-            self._mm.seek(0)
-            header_data = self._mm.read(48)
-            
-            # RTSS_SHARED_MEMORY_HEADER
-            # DWORD dwSignature ('RTSS')
-            # DWORD dwVersion
-            # DWORD dwAppEntryOffset
-            # DWORD dwAppEntrySize
-            # DWORD dwAppPropsOffset (not used here)
-            # DWORD dwAppPropsSize (not used here)
-            
-            sig, ver, app_off, app_size = struct.unpack("<IIII", header_data[:16])
-            
-            if sig != 0x53535452: # 'RTSS'
-                return 0
-                
-            # The number of app entries is usually at offset 20
-            app_count = struct.unpack("<I", header_data[24:28])[0]
-            
-            for i in range(app_count):
-                offset = app_off + i * app_size
-                self._mm.seek(offset)
-                app_data = self._mm.read(app_size)
-                
-                # RTSS_SHARED_MEMORY_APP_ENTRY
-                # DWORD dwProcessID
-                # TCHAR szName[260]
-                # ...
-                # DWORD dwStatFrameAvg (offset 304 in common V2 versions)
-                
-                pid = struct.unpack("<I", app_data[:4])[0]
-                if pid != 0:
-                    # In newer RTSS, dwStatFrameAvg is at offset 304.
-                    # It's an integer representing FPS * 10 or similar? 
-                    # Actually, usually it's just the average FPS.
-                    # For common versions:
-                    # Stat flags are at 296
-                    # StatFrameAvg is at 304
-                    fps = struct.unpack("<I", app_data[304:308])[0]
-                    
-                    # If it's a very large number, it might be weird. 
-                    # RTSS sometimes stores it as fixed point.
-                    if fps > 10000: # Probably fixed point or noise
-                         return 0
-                         
-                    return fps
-                    
-        except Exception as e:
-            logger.debug(f"Error reading RTSS FPS: {e}")
-            self._mm = None # Force re-open next time
-            
-        return 0
+        with self._lock:
+            return self._fps_value
 
-# Test
-if __name__ == "__main__":
-    import time
-    mon = FPSMonitor()
-    while True:
-        print(f"FPS: {mon.get_fps()}")
-        time.sleep(1)
+    def stop(self):
+        self._running = False
+        if self._lib:
+            try:
+                self._lib.StopEventRecording()
+            except: pass

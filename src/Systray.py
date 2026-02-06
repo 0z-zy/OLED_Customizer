@@ -77,6 +77,7 @@ def toggle_hw_monitor(icon):
     icon.manager.display_hw_monitor = not was_on
     icon.manager.user_preferences.preferences["display_hw_monitor"] = icon.manager.display_hw_monitor
     icon.manager.user_preferences.save_preferences()
+    icon.manager.update_preferences()
     icon.update_menu()
 
 def toggle_fps(icon):
@@ -85,8 +86,7 @@ def toggle_fps(icon):
     current = icon.manager.user_preferences.preferences.get("show_game_fps", False)
     icon.manager.user_preferences.preferences["show_game_fps"] = not current
     icon.manager.user_preferences.save_preferences()
-    if hasattr(icon.manager, "hw_monitor"):
-        icon.manager.hw_monitor.show_fps = not current
+    icon.manager.update_preferences()
     icon.update_menu()
 
 

@@ -160,7 +160,7 @@ class HardwareMonitor:
         
         # FPS Monitor
         self.fps_monitor = FPSMonitor()
-        self.show_fps = preferences.get_preference("show_game_fps") or False
+        self.show_fps = bool(preferences.get_preference("show_game_fps"))
         
         self._wmi = None
         if _wmi_available:
@@ -169,11 +169,10 @@ class HardwareMonitor:
             except:
                 pass
 
-    def update_preferences(self, config):
+    def update_preferences(self, preferences):
         """Update settings dynamically."""
-        self.config = config
-        self.show_fps = config.get("show_game_fps", False)
-        interval = config.get("hw_polling_interval", 1000)
+        self.show_fps = bool(preferences.get_preference("show_game_fps"))
+        interval = preferences.get_preference("hw_polling_interval") or 1000
         _lhm_worker._polling_interval = interval
         # If worker is not running, start it
         if not _lhm_worker._running:
@@ -241,10 +240,18 @@ class HardwareMonitor:
         ram_used = mem.used / (1024**3)
         ram_percent = mem.percent
         
-        # 4. FPS (Optional)
+        # 4. FPS (Native ETW / LHM Fallback)
         fps = 0
-        if self.show_fps:
+        show_fps = bool(self.preferences.get_preference("show_game_fps"))
+        if show_fps:
             fps = self.fps_monitor.get_fps()
+            if fps <= 0:
+                # Try LHM fallback (some GPUs or LHM plugins provide this)
+                lhm_fps = self._get_lhm_sensor("Gpu", "Factor", "Frame Rate")
+                if not lhm_fps:
+                     lhm_fps = self._get_lhm_sensor("Gpu", "Data", "Frame Rate")
+                if lhm_fps:
+                    fps = int(lhm_fps)
 
         # --- Layout Constants ---
         # 3 Columns: 0-42, 43-85, 86-128
@@ -283,14 +290,20 @@ class HardwareMonitor:
         draw_centered(f"{int(gpu_load) if gpu_load else 0}%", c2_x, y_text2)
 
         # --- Column 3: RAM / FPS ---
-        if self.show_fps and fps > 0:
-            # Show FPS in Column 3 instead of RAM total
+        if show_fps:
+            # If FPS toggle is ON, always prioritize showing FPS or Idle
             paste_centered(self.ram_icon, c3_x, y_icon)
             draw_centered(f"{ram_used:.1f}G", c3_x, y_text1)
-            # Smaller font for FPS label if needed, but let's try standard
-            draw_centered(f"{int(fps)} FPS", c3_x, y_text2)
+            if fps > 0:
+                # For high FPS (3 digits), shorten the label to avoid overlap
+                val_text = f"{int(fps)}"
+                if fps < 100:
+                    val_text += " FPS"
+                draw_centered(val_text, c3_x, y_text2)
+            else:
+                draw_centered("Idle", c3_x, y_text2)
         else:
-            # Default RAM display
+            # Default RAM display (RAM Used / Total)
             paste_centered(self.ram_icon, c3_x, y_icon)
             draw_centered(f"{ram_used:.1f}G", c3_x, y_text1)
             ram_total = mem.total / (1024**3)
