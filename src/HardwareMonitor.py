@@ -137,8 +137,9 @@ class HardwareMonitor:
     Hardware monitor overlay for OLED display.
     """
     
-    def __init__(self, config, timeout=3.0):
+    def __init__(self, config, preferences, timeout=3.0):
         self.config = config
+        self.preferences = preferences
         self.timeout = timeout
         self._last_trigger = 0.0
         
@@ -154,12 +155,12 @@ class HardwareMonitor:
         self.ram_icon = self._load_icon("ram_icon.png")
         
         # Start the LHM worker (idempotent)
-        interval = config.get("hw_polling_interval", 1000)
+        interval = preferences.get_preference("hw_polling_interval") or 1000
         _lhm_worker.start(interval)
         
         # FPS Monitor
         self.fps_monitor = FPSMonitor()
-        self.show_fps = config.get("show_game_fps", False)
+        self.show_fps = preferences.get_preference("show_game_fps") or False
         
         self._wmi = None
         if _wmi_available:

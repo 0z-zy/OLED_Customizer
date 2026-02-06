@@ -64,7 +64,7 @@ class DisplayManager:
         self.steelseries_api = SteelSeriesAPI()
 
         self.volume_overlay = VolumeOverlay(config)
-        self.hardware_monitor = HardwareMonitor(config)
+        self.hardware_monitor = HardwareMonitor(config, self.user_preferences)
         self.extension_receiver = ExtensionReceiver(port=8888)
         self.extension_receiver.start()
 
