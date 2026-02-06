@@ -174,6 +174,9 @@ class DisplayManager:
         if hasattr(self.player, "set_style"):
             self.player.set_style(self.user_preferences.get_preference("player_style"))
 
+        if hasattr(self, "hardware_monitor"):
+            self.hardware_monitor.update_preferences(self.user_preferences.preferences)
+
         # Hotkeys
         self.key_monitor_val = self._parse_key(self.user_preferences.get_preference("hotkey_monitor"))
         self.key_mute_val = self._parse_key(self.user_preferences.get_preference("hotkey_mute"))

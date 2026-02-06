@@ -14,6 +14,7 @@ import psutil
 from PIL import Image, ImageDraw, ImageFont
 
 from src.image_utils import fetch_content_path
+from src.fps_monitor import FPSMonitor
 
 logger = logging.getLogger("OLED Customizer.HardwareMonitor")
 
@@ -53,8 +54,10 @@ class _LHMWorker:
         self._cache_lock = Lock()
         self._running = False
         self._computer = None
+        self._polling_interval = 1000 # Default 1s
         
-    def start(self):
+    def start(self, interval=1000):
+        self._polling_interval = interval
         if self._running or not _lhm_available:
             return
         self._running = True
@@ -109,7 +112,7 @@ class _LHMWorker:
             except Exception as e:
                 logger.debug(f"LHM Worker update error: {e}")
                 
-            sleep(0.5)  # Update every 500ms
+            sleep(self._polling_interval / 1000.0)  # Dynamic interval
             
     def get_sensor(self, hw_type, sensor_type, name_contains=None):
         """Thread-safe read from cache."""
@@ -151,7 +154,12 @@ class HardwareMonitor:
         self.ram_icon = self._load_icon("ram_icon.png")
         
         # Start the LHM worker (idempotent)
-        _lhm_worker.start()
+        interval = config.get("hw_polling_interval", 1000)
+        _lhm_worker.start(interval)
+        
+        # FPS Monitor
+        self.fps_monitor = FPSMonitor()
+        self.show_fps = config.get("show_game_fps", False)
         
         self._wmi = None
         if _wmi_available:
@@ -159,6 +167,16 @@ class HardwareMonitor:
                 self._wmi = wmi.WMI(namespace="root/WMI")
             except:
                 pass
+
+    def update_preferences(self, config):
+        """Update settings dynamically."""
+        self.config = config
+        self.show_fps = config.get("show_game_fps", False)
+        interval = config.get("hw_polling_interval", 1000)
+        _lhm_worker._polling_interval = interval
+        # If worker is not running, start it
+        if not _lhm_worker._running:
+            _lhm_worker.start(interval)
 
     def _load_icon(self, filename):
         try:
@@ -221,6 +239,11 @@ class HardwareMonitor:
         mem = psutil.virtual_memory()
         ram_used = mem.used / (1024**3)
         ram_percent = mem.percent
+        
+        # 4. FPS (Optional)
+        fps = 0
+        if self.show_fps:
+            fps = self.fps_monitor.get_fps()
 
         # --- Layout Constants ---
         # 3 Columns: 0-42, 43-85, 86-128
@@ -234,10 +257,11 @@ class HardwareMonitor:
         y_text1 = 13
         y_text2 = 26
 
-        def draw_centered(text, cx, cy):
-            bbox = draw.textbbox((0, 0), text, font=self.FONT)
+        def draw_centered(text, cx, cy, font=None):
+            f = font or self.FONT
+            bbox = draw.textbbox((0, 0), text, font=f)
             tw = bbox[2] - bbox[0]
-            draw.text((cx + (col_width - tw) / 2, cy), text, font=self.FONT, fill=self.config.primary)
+            draw.text((cx + (col_width - tw) / 2, cy), text, font=f, fill=self.config.primary)
 
         def paste_centered(icon, cx, cy):
             if icon:
@@ -257,10 +281,18 @@ class HardwareMonitor:
         draw_centered(t_val, c2_x, y_text1)
         draw_centered(f"{int(gpu_load) if gpu_load else 0}%", c2_x, y_text2)
 
-        # --- Column 3: RAM ---
-        paste_centered(self.ram_icon, c3_x, y_icon)
-        draw_centered(f"{ram_used:.1f}G", c3_x, y_text1)
-        ram_total = mem.total / (1024**3)
-        draw_centered(f"{int(ram_total)}GB", c3_x, y_text2)
+        # --- Column 3: RAM / FPS ---
+        if self.show_fps and fps > 0:
+            # Show FPS in Column 3 instead of RAM total
+            paste_centered(self.ram_icon, c3_x, y_icon)
+            draw_centered(f"{ram_used:.1f}G", c3_x, y_text1)
+            # Smaller font for FPS label if needed, but let's try standard
+            draw_centered(f"{int(fps)} FPS", c3_x, y_text2)
+        else:
+            # Default RAM display
+            paste_centered(self.ram_icon, c3_x, y_icon)
+            draw_centered(f"{ram_used:.1f}G", c3_x, y_text1)
+            ram_total = mem.total / (1024**3)
+            draw_centered(f"{int(ram_total)}GB", c3_x, y_text2)
 
         return image

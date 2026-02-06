@@ -79,6 +79,16 @@ def toggle_hw_monitor(icon):
     icon.manager.user_preferences.save_preferences()
     icon.update_menu()
 
+def toggle_fps(icon):
+    if not icon.manager.user_preferences.valid:
+        return
+    current = icon.manager.user_preferences.preferences.get("show_game_fps", False)
+    icon.manager.user_preferences.preferences["show_game_fps"] = not current
+    icon.manager.user_preferences.save_preferences()
+    if hasattr(icon.manager, "hw_monitor"):
+        icon.manager.hw_monitor.show_fps = not current
+    icon.update_menu()
+
 
 
 def set_clock_style(icon, style):
@@ -374,6 +384,12 @@ def run_systray_async(display_manager):
             "Display HW Monitor",
             toggle_hw_monitor,
             checked=lambda item: display_manager.display_hw_monitor,
+            enabled=lambda item: display_manager.enabled,
+        ),
+        Item(
+            "   Show Game FPS (RTSS)",
+            toggle_fps,
+            checked=lambda item: display_manager.user_preferences.preferences.get("show_game_fps", False),
             enabled=lambda item: display_manager.enabled,
         ),
         Menu.SEPARATOR,

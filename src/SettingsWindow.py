@@ -284,6 +284,10 @@ class SettingsGUI:
         self.vars["scrollbar_padding"] = tk.StringVar(value=str(self.prefs.get_preference("scrollbar_padding") or "2"))
         self.vars["text_padding_left"] = tk.StringVar(value=str(self.prefs.get_preference("text_padding_left") or "30"))
         self.vars["auto_launch_gg"] = tk.BooleanVar(value=bool(self.prefs.get_preference("auto_launch_gg")))
+        
+        # HW Monitoring
+        self.vars["hw_polling_interval"] = tk.StringVar(value=str(self.prefs.get_preference("hw_polling_interval") or "1000"))
+        self.vars["show_game_fps"] = tk.BooleanVar(value=bool(self.prefs.get_preference("show_game_fps")))
 
     def _create_pages(self):
         # -- GENERAL PAGE --
@@ -321,6 +325,16 @@ class SettingsGUI:
         self._dropdown_row(p_disp, "Player Style", self.vars["player_style"], ["Standard", "Compact", "Centered", "Ticker", "Minimal"], command=self._quick_save)
         self._toggle_row(p_disp, "Always Show System Stats", self.vars["display_hw_monitor"],
                           command=lambda: self._exclusive_toggle("display_hw_monitor", "display_timer"))
+        
+        tk.Frame(p_disp, bg=Colors.CONTENT, height=10).pack()
+        self._toggle_row(p_disp, "Show Game FPS (needs RTSS)", self.vars["show_game_fps"])
+        
+        polling_options = {"500ms": "500", "1s (Default)": "1000", "2s": "2000", "5s": "5000"}
+        self._dropdown_row(p_disp, "HW Polling Rate", self.vars["hw_polling_interval"], 
+                          list(polling_options.keys()), 
+                          # Map back to value on save handled in _save_all
+                          display_to_val=polling_options)
+        
         self.pages["Display"] = p_disp
         
         # -- SPOTIFY PAGE --
@@ -405,6 +419,9 @@ class SettingsGUI:
                     except: val = 0
                 elif k == "date_format":
                     val = 24 if val else 12
+                elif k == "hw_polling_interval":
+                    try: val = int(val)
+                    except: val = 1000
                 self.prefs.preferences[k] = val
             
             self.prefs.preferences["rgb_color"] = self.rgb
@@ -433,13 +450,30 @@ class SettingsGUI:
         switch = ToggleSwitch(f, var, command=command)
         switch.pack(side="right", padx=15)
 
-    def _dropdown_row(self, parent, label, var, options, command=None):
+    def _dropdown_row(self, parent, label, var, options, command=None, display_to_val=None):
         f = self._row_frame(parent)
         tk.Label(f, text=label, font=FONT_BODY, fg=Colors.TEXT_MAIN, bg=Colors.CARD_BG).pack(side="left", padx=15)
-        cb = ttk.Combobox(f, textvariable=var, values=options, state="readonly", width=15)
+        
+        # If display_to_val is provided, 'var' holds the value but we show the label
+        if display_to_val:
+            # Find current label for the value
+            current_val = var.get()
+            current_label = next((l for l, v in display_to_val.items() if v == current_val), options[0])
+            display_var = tk.StringVar(value=current_label)
+            
+            def on_select(e):
+                val = display_to_val[display_var.get()]
+                var.set(val)
+                if command: command()
+                
+            cb = ttk.Combobox(f, textvariable=display_var, values=options, state="readonly", width=15)
+            cb.bind("<<ComboboxSelected>>", on_select)
+        else:
+            cb = ttk.Combobox(f, textvariable=var, values=options, state="readonly", width=15)
+            if command:
+                cb.bind("<<ComboboxSelected>>", lambda e: command())
+                
         cb.pack(side="right", padx=15)
-        if command:
-            cb.bind("<<ComboboxSelected>>", lambda e: command())
 
     def _entry_row(self, parent, label, var, width=10, show=None):
         f = self._row_frame(parent)
@@ -538,6 +572,9 @@ class SettingsGUI:
                     self.prefs.preferences[k] = val
                 elif k == "date_format":
                     self.prefs.preferences[k] = 24 if val else 12
+                elif k == "hw_polling_interval":
+                    try: self.prefs.preferences[k] = int(val)
+                    except: self.prefs.preferences[k] = 1000
                 else:
                     self.prefs.preferences[k] = val
             

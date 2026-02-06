@@ -37,7 +37,9 @@ class UserPreferences:
         "width": 128,
         "height": 40,
         "auto_launch_gg": False,
-        "player_style": "Standard"
+        "player_style": "Standard",
+        "hw_polling_interval": 1000,
+        "show_game_fps": False
     }
 
     def __init__(self):
