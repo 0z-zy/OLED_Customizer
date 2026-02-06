@@ -2,9 +2,11 @@
 Hardware Monitor for OLED display.
 Uses LibreHardwareMonitor via pythonnet to get CPU/GPU temps.
 Includes WMI fallback.
+
+Thread-safety: LHM runs in dedicated worker thread to avoid COM threading issues.
 """
 import logging
-from time import time
+from time import time, sleep
 from threading import Thread, Lock
 import os
 
@@ -17,8 +19,6 @@ logger = logging.getLogger("OLED Customizer.HardwareMonitor")
 
 # Try to load LibreHardwareMonitor
 _lhm_available = False
-_computer = None
-_update_lock = Lock()
 
 # WMI Fallback
 try:
@@ -41,21 +41,92 @@ except Exception as e:
     logger.warning(f"LibreHardwareMonitor not available: {e}")
 
 
-def _init_hardware():
-    """Initialize hardware monitoring (call once at startup)."""
-    global _computer
-    if not _lhm_available or _computer is not None:
-        return
+class _LHMWorker:
+    """
+    Dedicated worker thread that owns all LibreHardwareMonitor COM objects.
+    Main thread reads from cached values, never touching LHM directly.
+    This fixes COM threading crashes (RPC_E_WRONG_THREAD).
+    """
     
-    try:
-        _computer = HW.Computer()
-        _computer.IsCpuEnabled = True
-        _computer.IsGpuEnabled = True
-        _computer.IsMemoryEnabled = True
-        _computer.Open()
-        logger.info("Hardware monitoring initialized")
-    except Exception as e:
-        logger.error(f"Failed to init hardware monitoring: {e}")
+    def __init__(self):
+        self._cache = {}
+        self._cache_lock = Lock()
+        self._running = False
+        self._computer = None
+        
+    def start(self):
+        if self._running or not _lhm_available:
+            return
+        self._running = True
+        Thread(target=self._worker_loop, daemon=True, name="LHM-Worker").start()
+        
+    def _worker_loop(self):
+        """Runs in dedicated thread - owns all COM objects."""
+        try:
+            # Initialize COM for this thread
+            import ctypes
+            ctypes.windll.ole32.CoInitialize(0)
+        except Exception:
+            pass
+            
+        try:
+            self._computer = HW.Computer()
+            self._computer.IsCpuEnabled = True
+            self._computer.IsGpuEnabled = True
+            self._computer.IsMemoryEnabled = True
+            self._computer.Open()
+            logger.info("LHM Worker: Hardware monitoring initialized")
+        except Exception as e:
+            logger.error(f"LHM Worker: Failed to init: {e}")
+            self._running = False
+            return
+            
+        # Main update loop - update sensors every 500ms
+        while self._running:
+            try:
+                new_cache = {}
+                
+                for hw in self._computer.Hardware:
+                    hw_type = str(hw.HardwareType).lower()
+                    hw.Update()
+                    
+                    for sensor in hw.Sensors:
+                        if sensor.Value is not None and sensor.Value > 0:
+                            key = (hw_type, str(sensor.SensorType).lower(), str(sensor.Name).lower())
+                            new_cache[key] = float(sensor.Value)
+                            
+                    # SubHardware (some GPUs)
+                    for sub in hw.SubHardware:
+                        sub.Update()
+                        for sensor in sub.Sensors:
+                            if sensor.Value is not None and sensor.Value > 0:
+                                key = (hw_type, str(sensor.SensorType).lower(), str(sensor.Name).lower())
+                                new_cache[key] = float(sensor.Value)
+                
+                with self._cache_lock:
+                    self._cache = new_cache
+                    
+            except Exception as e:
+                logger.debug(f"LHM Worker update error: {e}")
+                
+            sleep(0.5)  # Update every 500ms
+            
+    def get_sensor(self, hw_type, sensor_type, name_contains=None):
+        """Thread-safe read from cache."""
+        with self._cache_lock:
+            for (hw, st, name), value in self._cache.items():
+                if hw_type.lower() not in hw:
+                    continue
+                if sensor_type.lower() not in st:
+                    continue
+                if name_contains and name_contains.lower() not in name:
+                    continue
+                return value
+        return None
+
+
+# Global worker instance
+_lhm_worker = _LHMWorker()
 
 
 class HardwareMonitor:
@@ -68,7 +139,7 @@ class HardwareMonitor:
         self.timeout = timeout
         self._last_trigger = 0.0
         
-        # Larger font
+        # Instance-level font (not shared across threads)
         self.FONT = ImageFont.truetype(
             font=fetch_content_path("fonts/VerdanaBold.ttf"),
             size=11,
@@ -79,8 +150,8 @@ class HardwareMonitor:
         self.gpu_icon = self._load_icon("gpu_icon.png")
         self.ram_icon = self._load_icon("ram_icon.png")
         
-        # Initialize hardware monitoring in background
-        Thread(target=_init_hardware, daemon=True).start()
+        # Start the LHM worker (idempotent)
+        _lhm_worker.start()
         
         self._wmi = None
         if _wmi_available:
@@ -105,40 +176,8 @@ class HardwareMonitor:
         return (time() - self._last_trigger) < self.timeout
 
     def _get_lhm_sensor(self, hw_type, sensor_type, name_contains=None):
-        """Get value from LHM."""
-        if not _lhm_available or _computer is None:
-            return None
-        
-        try:
-            with _update_lock:
-                # Iterate all hardware
-                for hw in _computer.Hardware:
-                    # Filter HW type
-                    if hw_type.lower() not in str(hw.HardwareType).lower():
-                        continue
-                        
-                    hw.Update()
-                    for sensor in hw.Sensors:
-                        if sensor_type.lower() not in str(sensor.SensorType).lower():
-                            continue
-                        if name_contains and name_contains.lower() not in str(sensor.Name).lower():
-                            continue
-                        if sensor.Value is not None and sensor.Value > 0:
-                            return float(sensor.Value)
-                            
-                    # SubHardware (some GPUs)
-                    for sub in hw.SubHardware:
-                        sub.Update()
-                        for sensor in sub.Sensors:
-                            if sensor_type.lower() not in str(sensor.SensorType).lower():
-                                continue
-                            if name_contains and name_contains.lower() not in str(sensor.Name).lower():
-                                continue
-                            if sensor.Value is not None and sensor.Value > 0:
-                                return float(sensor.Value)
-        except:
-            pass
-        return None
+        """Get value from LHM worker cache (thread-safe)."""
+        return _lhm_worker.get_sensor(hw_type, sensor_type, name_contains)
 
     def _get_wmi_cpu_temp(self):
         """Fallback CPU temp from WMI."""

@@ -264,8 +264,13 @@ def build_restore_menu():
         return [Item("No backups available", None, enabled=False)]
     
     items = []
-    for name, path, count in backups[:10]:  # Limit to 10
-        label = f"{name} ({count} files)"
+    for name, path, count, mtime in backups[:10]:  # Limit to 10
+        # Make label prettier
+        display_name = name
+        if name.startswith("pre_restore_"):
+            display_name = "🛡️ Safety: " + name.replace("pre_restore_", "")
+        
+        label = f"{display_name} ({count} files)"
         logger.debug(f"Adding restore option: {label} -> {path}")
         # Create a closure to capture path correctly
         def make_restore_action(backup_path):

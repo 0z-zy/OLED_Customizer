@@ -36,6 +36,10 @@ class WindowsMedia:
             sessions = None
             try:
                 sessions = self.manager.get_sessions()
+            except (OSError, RuntimeError):
+                # COM threading error - manager may be stale
+                self.manager = None
+                return {}
             except Exception:
                 pass
 
@@ -49,17 +53,25 @@ class WindowsMedia:
             # Priority 1: Find a PLAYING session
             if sessions:
                 for session in sessions:
-                    info = session.get_playback_info()
-                    # source_id = session.source_app_user_model_id or "unknown"
-                    # status_name = info.playback_status.name if info else "none"
-                    # logging.debug(f"  Session: {source_id} -> Status: {status_name}")
-                    if info and info.playback_status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.PLAYING:
-                        current_session = session
-                        # DON'T break, keep logging all
+                    try:
+                        info = session.get_playback_info()
+                        # source_id = session.source_app_user_model_id or "unknown"
+                        # status_name = info.playback_status.name if info else "none"
+                        # logging.debug(f"  Session: {source_id} -> Status: {status_name}")
+                        if info and info.playback_status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.PLAYING:
+                            current_session = session
+                            # DON'T break, keep logging all
+                    except (OSError, RuntimeError):
+                        # Skip sessions with COM errors
+                        continue
             
             # Priority 2: Fallback to system "Current" session
             if not current_session:
-                current_session = self.manager.get_current_session()
+                try:
+                    current_session = self.manager.get_current_session()
+                except (OSError, RuntimeError):
+                    self.manager = None
+                    return {}
                 # if current_session:
                 #     logging.debug(f"  Fallback to get_current_session: {current_session.source_app_user_model_id}")
             

@@ -20,9 +20,25 @@ class SteelSeriesAPI:
             path.join(programdata, "SteelSeries", "SteelSeries GG", "coreProps.json"),
         ]
         self.address = ""
-        # Use persistent Session to reduce object churn and prevent GC crashes
+        # Use persistent Session with connection pooling to reduce object churn
+        # This prevents GC crashes during frequent API calls
+        from urllib3.util.retry import Retry
+        from requests.adapters import HTTPAdapter
+        
         self._session = requests.Session()
         self._session.headers.update({"Connection": "keep-alive"})
+        
+        # Limit pool size and disable retries to minimize object creation
+        adapter = HTTPAdapter(
+            pool_connections=1,
+            pool_maxsize=1,
+            max_retries=Retry(total=0)
+        )
+        self._session.mount("http://", adapter)
+        
+        # Thread lock to prevent concurrent sends
+        self._send_lock = __import__('threading').Lock()
+        
         self.retrieve_address()
 
     def retrieve_address(self):
@@ -123,14 +139,19 @@ class SteelSeriesAPI:
         })
 
     def send_data(self, endpoint, data):
-        try:
-            response = self._session.post(
-                self.address + endpoint,
-                json=data,
-                timeout=0.25
-            )
-            if response.status_code != 200:
-                logger.debug("SteelSeries API error %d: %s", response.status_code, response.text)
-        except Exception as e:
-            # Silently ignore timeouts/connection errors during normal operation
-            pass
+        # Use lock to prevent concurrent sends (reduces object churn/GC crashes)
+        with self._send_lock:
+            try:
+                response = self._session.post(
+                    self.address + endpoint,
+                    json=data,
+                    timeout=0.25
+                )
+                if response.status_code != 200:
+                    logger.debug("SteelSeries API error %d: %s", response.status_code, response.text)
+            except (OSError, RuntimeError) as e:
+                # Silently handle COM/threading errors that can occur during GC
+                pass
+            except Exception as e:
+                # Silently ignore timeouts/connection errors during normal operation
+                pass

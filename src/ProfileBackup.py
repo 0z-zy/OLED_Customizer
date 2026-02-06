@@ -29,12 +29,12 @@ def get_backup_dir() -> str:
     return fetch_app_data_path("backups")
 
 
-def list_backups() -> List[Tuple[str, str, int]]:
+def list_backups() -> List[Tuple[str, str, int, float]]:
     """
     List all available backups.
     
     Returns:
-        List of (backup_name, full_path, file_count) tuples, newest first.
+        List of (backup_name, full_path, file_count, mtime) tuples, newest first.
     """
     backup_dir = get_backup_dir()
     if not os.path.exists(backup_dir):
@@ -45,10 +45,11 @@ def list_backups() -> List[Tuple[str, str, int]]:
         path = os.path.join(backup_dir, name)
         if os.path.isdir(path):
             files = [f for f in os.listdir(path) if f.endswith(".db")]
-            backups.append((name, path, len(files)))
+            mtime = os.path.getmtime(path)
+            backups.append((name, path, len(files), mtime))
     
-    # Sort by name (which is date), newest first
-    backups.sort(reverse=True)
+    # Sort by modification time, newest first
+    backups.sort(key=lambda x: x[3], reverse=True)
     return backups
 
 

@@ -542,6 +542,10 @@ class DisplayManager:
                     # if data and data.get("title"):
                     #    logger.info(f"SMTC: {data.get('source')} -> {data.get('title')[:30]}")
                     
+                except (OSError, RuntimeError) as e:
+                    # COM threading error - reset manager
+                    logger.debug(f"SMTC COM error, resetting: {e}")
+                    self.windows_media.manager = None
                 except Exception as e:
                     logger.debug(f"SMTC poll error: {e}")
                 
@@ -550,11 +554,26 @@ class DisplayManager:
         # Keep restarting the loop if it crashes (SMTC/WinRT can be unstable)
         while True:
             try:
-                asyncio.run(runner())
+                # Use persistent event loop instead of asyncio.run() to avoid thread issues
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(runner())
+                finally:
+                    loop.close()
+            except (OSError, RuntimeError) as e:
+                # COM/threading error - common with WinRT
+                logger.debug(f"SMTC loop COM error, restarting: {e}")
             except Exception as e:
                 logger.error(f"SMTC loop crashed, restarting in 2s: {e}")
-                import time as _time
-                _time.sleep(2)
-                # Reset manager to force re-init
-                self.windows_media.manager = None
-
+            
+            import time as _time
+            _time.sleep(2)
+            # Reset manager to force re-init
+            self.windows_media.manager = None
+            # Re-initialize COM for this thread
+            try:
+                ctypes.windll.ole32.CoUninitialize()
+                ctypes.windll.ole32.CoInitialize(0)
+            except Exception:
+                pass

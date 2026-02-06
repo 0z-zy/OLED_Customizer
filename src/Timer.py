@@ -7,13 +7,6 @@ from src.utils import normalize_text
 
 
 class Timer:
-    # Fonts
-    FONT_DIGI_BIG = ImageFont.truetype(font=fetch_content_path('fonts/DS-DIGIB.ttf'), size=24)
-    FONT_DIGI_MED = ImageFont.truetype(font=fetch_content_path('fonts/DS-DIGIB.ttf'), size=20)
-    FONT_DIGI_SMALL = ImageFont.truetype(font=fetch_content_path('fonts/DS-DIGIB.ttf'), size=14)
-    
-    FONT_HUGE = ImageFont.truetype(font=fetch_content_path('fonts/DS-DIGIB.ttf'), size=38)
-
     class Style:
         STANDARD = "Standard"
         BIG = "Big Timer"
@@ -26,6 +19,12 @@ class Timer:
         self.display_seconds = display_seconds
         self.use_turkish_days = use_turkish_days
         self.style = style
+        
+        # Instance-level fonts (not shared across threads - prevents GC crashes)
+        self.FONT_DIGI_BIG = ImageFont.truetype(font=fetch_content_path('fonts/DS-DIGIB.ttf'), size=24)
+        self.FONT_DIGI_MED = ImageFont.truetype(font=fetch_content_path('fonts/DS-DIGIB.ttf'), size=20)
+        self.FONT_DIGI_SMALL = ImageFont.truetype(font=fetch_content_path('fonts/DS-DIGIB.ttf'), size=14)
+        self.FONT_HUGE = ImageFont.truetype(font=fetch_content_path('fonts/DS-DIGIB.ttf'), size=38)
 
     def set_style(self, style):
         self.style = style
