@@ -299,68 +299,77 @@ class DisplayManager:
             if now_ms - self._last_yt_poll_ms >= self._yt_poll_ms:
                 self._last_yt_poll_ms = now_ms
                 
-                # Try Extension First
-                ext_data = self.extension_receiver.get_latest_data()
-                
-                if ext_data:
-                    # Extension is providing data (even if paused)
-                    self._extension_last_data_ms = now_ms
-                    is_playing = bool(ext_data.get("playing"))
-                    
-                    self._yt_last_seen_ms = now_ms
-                    self._yt_paused = not is_playing
-                    if is_playing:
-                        self._yt_last_playing_ms = now_ms
-                    
-                    # Convert extension keys to expected player keys
-                    payload = {
-                        "title": ext_data.get("title"),
-                        "artist": ext_data.get("artist"),
-                        "progress": int(ext_data.get("progress") * 1000), # extension sends seconds
-                        "duration": int(ext_data.get("duration") * 1000),
-                        "paused": not is_playing,
-                        "source": "youtube"
-                    }
-                    
-                    spotify_active = (not self._spotify_paused) and \
-                                     ((now_ms - self._spotify_last_playing_ms) <= self._spotify_hold_playing_ms)
-                    
-                    if not spotify_active:
-                        self._apply_to_player(self.player, payload, now_ms, source="youtube")
-                
-                else:
-                    # Stickiness: If we saw extension data recently, ignore SMTC fallback
-                    in_extension_lock = (now_ms - self._extension_last_data_ms) < (self._extension_lock_seconds * 1000)
-                    
-                    if not in_extension_lock:
-                        # Fallback to SMTC
-                        with self._smtc_lock:
-                            fb = self._smtc_data
-                        
-                        if fb and (fb.get("title") or fb.get("artist")):
-                            self._yt_last_seen_ms = now_ms
-                            self._yt_paused = bool(fb.get("paused", False))
-                            if not self._yt_paused:
-                                self._yt_last_playing_ms = now_ms
+            # Fetch both sources
+            ext_data = self.extension_receiver.get_latest_data()
+            
+            with self._smtc_lock:
+                smtc_fb = self._smtc_data.copy() if self._smtc_data else {}
+            
+            smtc_active = bool(smtc_fb and (smtc_fb.get("title") or smtc_fb.get("artist")))
+            ext_active = ext_data is not None
+            
+            payload = None
 
-                            # Determine source from SMTC source app
-                            src_app = (fb.get("source") or "").lower()
-                            if "spotify" in src_app:
-                                source = "spotify"
-                            elif "chrome" in src_app or "edge" in src_app or "firefox" in src_app or "opera" in src_app:
-                                source = "youtube"
-                            else:
-                                source = "generic"
+            if smtc_active and ext_active:
+                # MERGE: Extension has best Title/Artist, SMTC has best Duration/Progress
+                self._extension_last_data_ms = now_ms
+                is_playing = bool(ext_data.get("playing"))
+                
+                prog = int(ext_data.get("progress") * 1000)
+                dur = int(ext_data.get("duration") * 1000)
+                
+                # If SMTC is reporting a valid duration, let it override the extension
+                if smtc_fb.get("duration", -1) > 0:
+                    prog = smtc_fb.get("progress", prog)
+                    dur = smtc_fb.get("duration", dur)
+                    is_playing = not bool(smtc_fb.get("paused", not is_playing))
+                
+                payload = {
+                    "title": ext_data.get("title") or smtc_fb.get("title"),
+                    "artist": ext_data.get("artist") or smtc_fb.get("artist"),
+                    "progress": prog,
+                    "duration": dur,
+                    "paused": not is_playing,
+                    "source": "youtube"
+                }
 
-                            # Spotify aktif çalıyorsa YT overwrite etmesin
-                            spotify_active = (not self._spotify_paused) and \
-                                             ((now_ms - self._spotify_last_playing_ms) <= self._spotify_hold_playing_ms)
-                            
-                            if not spotify_active:
-                                self._apply_to_player(self.player, fb, now_ms, source=source)
-                    else:
-                        # No media from extension or SMTC
-                        pass
+            elif ext_active:
+                # ONLY EXTENSION
+                self._extension_last_data_ms = now_ms
+                is_playing = bool(ext_data.get("playing"))
+                payload = {
+                    "title": ext_data.get("title"),
+                    "artist": ext_data.get("artist"),
+                    "progress": int(ext_data.get("progress") * 1000),
+                    "duration": int(ext_data.get("duration") * 1000),
+                    "paused": not is_playing,
+                    "source": "youtube"
+                }
+
+            elif smtc_active:
+                # Stickiness for extension: if closed recently, don't glitch to basic SMTC names
+                in_ext_lock = (now_ms - self._extension_last_data_ms) < (self._extension_lock_seconds * 1000)
+                if not in_ext_lock:
+                    # ONLY SMTC
+                    src_app = (smtc_fb.get("source") or "").lower()
+                    source = "youtube" if any(x in src_app for x in ["chrome", "edge", "firefox", "opera"]) else "generic"
+                    if "spotify" in src_app: source = "spotify"
+                    
+                    payload = smtc_fb.copy()
+                    payload["source"] = source
+
+            if payload:
+                self._yt_last_seen_ms = now_ms
+                self._yt_paused = bool(payload.get("paused", False))
+                if not self._yt_paused:
+                    self._yt_last_playing_ms = now_ms
+                
+                # Spotify priority check (Spotify wins if officially playing)
+                spotify_active = (not self._spotify_paused) and \
+                                 ((now_ms - self._spotify_last_playing_ms) <= self._spotify_hold_playing_ms)
+                
+                if not spotify_active:
+                    self._apply_to_player(self.player, payload, now_ms, source=payload.get("source", "youtube"))
 
             # 2) Spotify poll (normal) - only if Spotify is enabled
             if self.spotify_api and now_ms - self._last_spotify_poll_ms >= self._spotify_poll_ms:

@@ -5,8 +5,42 @@
 
 let lastSentData = null;
 
+function getActiveVideo() {
+    const videos = Array.from(document.querySelectorAll('video'));
+    if (videos.length === 0) return null;
+
+    // Filter to videos that are actually playing and have valid duration
+    const playingVideos = videos.filter(v => !v.paused && v.duration > 0 && v.offsetHeight > 10);
+
+    if (playingVideos.length === 1) {
+        return playingVideos[0];
+    }
+
+    // If multiple (or none playing but swiping), find the one most visible on screen
+    let bestVideo = null;
+    let maxVisibility = -1;
+
+    for (let v of videos) {
+        // Skip tiny/hidden videos
+        if (v.offsetHeight < 10) continue;
+
+        const rect = v.getBoundingClientRect();
+        const visibleHeight = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+
+        // Prioritize playing videos over paused ones if visibility is similar
+        const score = visibleHeight + (!v.paused ? 1000 : 0);
+
+        if (score > maxVisibility) {
+            maxVisibility = score;
+            bestVideo = v;
+        }
+    }
+
+    return bestVideo || videos[0];
+}
+
 function scrapeMediaInfo() {
-    const video = document.querySelector('video');
+    const video = getActiveVideo();
     if (!video) return null;
 
     // Site-specific logic (currently YouTube)
@@ -14,17 +48,29 @@ function scrapeMediaInfo() {
     let artist = "";
 
     if (window.location.host.includes('youtube.com')) {
-        // YouTube Title - More robust selectors
-        const titleEl = document.querySelector('h1.ytd-video-primary-info-renderer yc-video-title') ||
-            document.querySelector('ytd-watch-metadata h1') ||
-            document.querySelector('.ytp-title-link');
-        title = titleEl ? titleEl.innerText : document.title.replace(" - YouTube", "");
+        if (window.location.pathname.startsWith('/shorts/')) {
+            // YouTube Shorts Title & Artist
+            const activeReel = document.querySelector('ytd-reel-video-renderer[is-active]');
+            if (activeReel) {
+                const titleEl = activeReel.querySelector('h2.title yt-formatted-string');
+                title = titleEl ? titleEl.innerText : document.title.replace(" - YouTube", "");
 
-        // YouTube Channel (Artist)
-        const channelEl = document.querySelector('ytd-video-owner-renderer #channel-name a') ||
-            document.querySelector('#upload-info #channel-name a') ||
-            document.querySelector('.ytp-ce-channel-title');
-        artist = channelEl ? channelEl.innerText : "YouTube Video";
+                const channelEl = activeReel.querySelector('#channel-name a') || activeReel.querySelector('ytd-channel-name a');
+                artist = channelEl ? channelEl.innerText : "YouTube Shorts";
+            }
+        } else {
+            // Normal YouTube Title - More robust selectors
+            const titleEl = document.querySelector('h1.ytd-video-primary-info-renderer yc-video-title') ||
+                document.querySelector('ytd-watch-metadata h1') ||
+                document.querySelector('.ytp-title-link');
+            title = titleEl ? titleEl.innerText : document.title.replace(" - YouTube", "");
+
+            // Normal YouTube Channel (Artist)
+            const channelEl = document.querySelector('ytd-video-owner-renderer #channel-name a') ||
+                document.querySelector('#upload-info #channel-name a') ||
+                document.querySelector('.ytp-ce-channel-title');
+            artist = channelEl ? channelEl.innerText : "YouTube Video";
+        }
     }
 
     return {

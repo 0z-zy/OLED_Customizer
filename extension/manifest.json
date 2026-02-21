@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "OLED Customizer - Sync",
-    "version": "1.0",
+    "version": "1.4.1",
     "description": "Sends accurate media timeline data to OLED Customizer.",
     "permissions": [
         "scripting",
