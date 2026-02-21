@@ -33,14 +33,14 @@ def convert_color(o):
 
 
 def convert_to_bitmap(image_data):
-    res = []
+    res = bytearray()
     for i in range(0, len(image_data), 8):
         byte = 0
         for j in range(7, -1, -1):
             byte += convert_color(image_data[i + j]) << (7 - j)
         res.append(byte)
 
-    return res
+    return bytes(res)  # Immutable bytes = faster comparison, less GC pressure
 
 
 def draw_spotify(image, position):

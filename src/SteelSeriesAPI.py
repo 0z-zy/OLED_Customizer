@@ -1,5 +1,6 @@
 from json import loads
 from time import sleep, time
+import gc
 from os import environ, path
 import logging
 import requests
@@ -38,6 +39,10 @@ class SteelSeriesAPI:
         
         # Thread lock to prevent concurrent sends
         self._send_lock = __import__('threading').Lock()
+        
+        # Error back-off: stop hammering API when it's struggling
+        self._consecutive_errors = 0
+        self._backoff_until = 0  # timestamp - don't send until this time
         
         self.retrieve_address()
 
@@ -96,10 +101,12 @@ class SteelSeriesAPI:
         logger.info("Binding game event (128x40 only)")
 
     def send_frame(self, image_128x40):
-        if not isinstance(image_128x40, list):
-            raise ValueError("Image must be a list")
+        if not isinstance(image_128x40, (list, bytes, bytearray)):
+            raise ValueError("Image must be a list or bytes")
 
-        img40 = image_128x40[:640] + [0] * max(0, 640 - len(image_128x40))
+        # Convert to list for JSON - pad/trim to exactly 640 bytes
+        img_list = list(image_128x40[:640])
+        img40 = img_list + [0] * max(0, 640 - len(img_list))
 
         self.send_data("/game_event", {
             "game": GAME,
@@ -135,23 +142,57 @@ class SteelSeriesAPI:
             "game": GAME,
             "game_display_name": GAME_DISPLAY_NAME,
             "developer": AUTHOR,
-            "deinitialize_timer_length_ms": 60000 # 1 minute keep-alive
+            "deinitialize_timer_length_ms": 900000  # 15 minutes keep-alive (was 60s)
         })
 
+    def heartbeat(self):
+        """Send a lightweight heartbeat to keep the game registered with SteelSeries GG."""
+        try:
+            self.send_data("/game_heartbeat", {"game": GAME})
+        except Exception:
+            pass
+
     def send_data(self, endpoint, data):
+        # Error back-off: if we've had too many errors, wait before retrying
+        if self._consecutive_errors >= 5:
+            now = time()
+            if now < self._backoff_until:
+                return  # Still in back-off period, skip this send
+            else:
+                # Back-off expired, reset and try again
+                logger.info("Back-off expired, resuming API calls...")
+                self._consecutive_errors = 0
+
         # Use lock to prevent concurrent sends (reduces object churn/GC crashes)
         with self._send_lock:
+            response = None
             try:
                 response = self._session.post(
                     self.address + endpoint,
                     json=data,
-                    timeout=0.25
+                    timeout=0.5
                 )
                 if response.status_code != 200:
                     logger.debug("SteelSeries API error %d: %s", response.status_code, response.text)
+                    self._consecutive_errors += 1
+                else:
+                    # Success - reset error counter
+                    self._consecutive_errors = 0
             except (OSError, RuntimeError) as e:
-                # Silently handle COM/threading errors that can occur during GC
-                pass
+                # COM/threading errors that can occur during GC
+                self._consecutive_errors += 1
             except Exception as e:
-                # Silently ignore timeouts/connection errors during normal operation
-                pass
+                # Timeouts/connection errors
+                self._consecutive_errors += 1
+            finally:
+                # IMPORTANT: Always close response to free memory
+                if response is not None:
+                    try:
+                        response.close()
+                    except Exception:
+                        pass
+
+                # If we hit the error threshold, start back-off
+                if self._consecutive_errors >= 5:
+                    self._backoff_until = time() + 2.0  # Wait 2 seconds
+                    logger.warning("Too many API errors (%d), backing off for 2s", self._consecutive_errors)

@@ -1,4 +1,5 @@
 from threading import Thread
+from queue import Queue, Empty
 from time import sleep, time
 import logging
 
@@ -138,6 +139,11 @@ class DisplayManager:
         self.auto_launch_gg = False
         self._last_launch_attempt = 0
         self._last_frame_sent_time = 0
+        self._last_heartbeat_time = 0  # Heartbeat to keep game registered
+
+        # Spotify worker thread (single persistent thread instead of spawning new ones)
+        self._spotify_queue = Queue(maxsize=1)
+        Thread(target=self._spotify_worker_loop, daemon=True, name="Spotify-Worker").start()
         
         self.load_preferences()
 
@@ -359,11 +365,11 @@ class DisplayManager:
             # 2) Spotify poll (normal) - only if Spotify is enabled
             if self.spotify_api and now_ms - self._last_spotify_poll_ms >= self._spotify_poll_ms:
                 self._last_spotify_poll_ms = now_ms
-                Thread(
-                    target=self._poll_spotify,
-                    daemon=True,
-                    args=(self.spotify_api,),
-                ).start()
+                # Submit to persistent worker thread instead of creating new threads
+                try:
+                    self._spotify_queue.put_nowait(self.spotify_api)
+                except Exception:
+                    pass  # Queue full = previous poll still running, skip
 
             # 3) Hangi kaynağı göstereceğiz?
             # FIX: Pause olduğu an (not paused) False döner ve direkt saate düşer.
@@ -417,7 +423,26 @@ class DisplayManager:
                     except Exception:
                         pass
 
+            # Heartbeat: keep the game registered with SteelSeries GG (every 30s)
+            if now_sec - self._last_heartbeat_time > 30.0:
+                self._last_heartbeat_time = now_sec
+                try:
+                    self.steelseries_api.heartbeat()
+                except Exception:
+                    pass
+
             sleep(1 / self.fps)
+
+    def _spotify_worker_loop(self):
+        """Persistent worker thread for Spotify polling (prevents thread leak)."""
+        while True:
+            try:
+                spotify_api = self._spotify_queue.get(timeout=2.0)
+                self._poll_spotify(spotify_api)
+            except Empty:
+                continue  # No work, loop back
+            except Exception:
+                pass
 
     def _poll_spotify(self, spotify_api):
         try:

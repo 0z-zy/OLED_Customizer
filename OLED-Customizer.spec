@@ -32,11 +32,39 @@ except ImportError:
     if not hw_monitor_dlls:
         print("WARNING: HardwareMonitor DLLs not found - hardware monitoring may not work!")
 
+from PyInstaller.utils.hooks import collect_all
+
+def collect_pkg(name):
+    try:
+        datas, binaries, hiddenimports = collect_all(name)
+        return datas, binaries, hiddenimports
+    except:
+        return [], [], []
+
+# List of problematic packages to collect all data/submodules for
+problem_pkgs = [
+    'pycaw', 'comtypes', 'OpenSSL', 'cryptography', 
+    'pynput', 'winrt', 'wmi', 'pythonnet', 'psutil',
+    'HardwareMonitor'
+]
+
+extra_datas = []
+extra_binaries = []
+extra_hidden = []
+
+for pkg in problem_pkgs:
+    d, b, h = collect_pkg(pkg)
+    extra_datas += d
+    extra_binaries += b
+    extra_hidden += h
+
 # List of assets to include
 added_files = [
     ('version.py', '.'),
     ('src/lib/PresentMon.dll', 'src/lib'),
-] + hw_monitor_dlls
+] + hw_monitor_dlls + extra_datas
+
+print(f"Collected {len(extra_datas)} extra data files, {len(extra_binaries)} binaries, {len(extra_hidden)} hidden imports")
 
 # Recursively add everything in 'content' folder
 content_path = os.path.abspath('content')
@@ -63,46 +91,30 @@ for root, dirs, files in os.walk(content_path):
         print(f"Adding {filename} -> {target_dir}")
         added_files.append((file_path, target_dir))
 
+# Find user site-packages so PyInstaller can collect packages installed there
+import site
+user_site = site.getusersitepackages()
+extra_paths = [base_path]
+if isinstance(user_site, str) and os.path.isdir(user_site):
+    extra_paths.append(user_site)
+    print(f"Adding user site-packages: {user_site}")
+
 a = Analysis(
     ['main.py'],
-    pathex=[base_path],
-    binaries=[],
+    pathex=extra_paths,
+    binaries=extra_binaries,
     datas=added_files,
-    hiddenimports=[
-        'psutil',
-        'PIL',
-        'PIL.Image',
-        'PIL.ImageDraw',
-        'PIL.ImageFont',
-        'requests',
-        'win32gui',
-        'win32api',
-        'win32con',
-        'win32process',
-        'pystray',
-        'asyncio',
-        'winrt',
-        'winrt.windows.media.control',
-        'winrt.windows.foundation',
-        'winrt.windows.media',
-        'HardwareMonitor',
-        'HardwareMonitor.Hardware',
-        'clr',
-        'pythonnet',
-        'tkinter',
-        'pynput',
-        'pynput.keyboard',
-        'pynput.mouse',
-        'pynput.keyboard._win32',
-        'pynput.mouse._win32',
-        'src.SettingsWindow',
-        'wmi',
-        'OpenSSL',
-        'cryptography',
-        'pycaw',
-        'pycaw.pycaw',
-        'comtypes',
-    ],
+    hiddenimports=list(set([
+        'psutil', 'PIL', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont',
+        'requests', 'win32gui', 'win32api', 'win32con', 'win32process',
+        'pystray', 'asyncio', 'winrt', 'winrt.windows.media.control',
+        'winrt.windows.foundation', 'winrt.windows.media',
+        'HardwareMonitor', 'HardwareMonitor.Hardware',
+        'clr', 'pythonnet', 'tkinter', 'pynput', 'pynput.keyboard',
+        'pynput.mouse', 'pynput.keyboard._win32', 'pynput.mouse._win32',
+        'src.SettingsWindow', 'wmi', 'OpenSSL', 'OpenSSL.crypto',
+        'OpenSSL.SSL', 'cryptography', 'pycaw', 'pycaw.pycaw', 'comtypes',
+    ] + extra_hidden)),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
