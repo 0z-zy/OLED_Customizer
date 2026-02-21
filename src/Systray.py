@@ -281,7 +281,7 @@ def build_restore_menu():
             display_name = "🛡️ Safety: " + name.replace("pre_restore_", "")
         
         label = f"{display_name} ({count} files)"
-        logger.debug(f"Adding restore option: {label} -> {path}")
+        # logger.debug(f"Adding restore option: {label} -> {path}")
         # Create a closure to capture path correctly
         def make_restore_action(backup_path):
             def action(icon, item):

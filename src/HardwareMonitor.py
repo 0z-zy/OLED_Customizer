@@ -91,19 +91,23 @@ class _LHMWorker:
                 
                 for hw in self._computer.Hardware:
                     hw_type = str(hw.HardwareType).lower()
+                    hw_name = str(hw.Name)
                     hw.Update()
                     
+                    # logger.debug(f"LHM: Processing HW: {hw_name} ({hw_type})")
+                    
                     for sensor in hw.Sensors:
-                        if sensor.Value is not None and sensor.Value > 0:
-                            key = (hw_type, str(hw.Name), str(sensor.SensorType).lower(), str(sensor.Name).lower())
+                        if sensor.Value is not None:
+                            # Use tuple key: (hw_type, hw_name, sensor_type, sensor_name)
+                            key = (hw_type, hw_name, str(sensor.SensorType).lower(), str(sensor.Name).lower())
                             new_cache[key] = float(sensor.Value)
                             
                     # SubHardware (some GPUs)
                     for sub in hw.SubHardware:
                         sub.Update()
                         for sensor in sub.Sensors:
-                            if sensor.Value is not None and sensor.Value > 0:
-                                key = (hw_type, str(hw.Name), str(sensor.SensorType).lower(), str(sensor.Name).lower())
+                            if sensor.Value is not None:
+                                key = (hw_type, hw_name, str(sensor.SensorType).lower(), str(sensor.Name).lower())
                                 new_cache[key] = float(sensor.Value)
                 
                 with self._cache_lock:
