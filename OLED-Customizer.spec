@@ -91,13 +91,33 @@ for root, dirs, files in os.walk(content_path):
         print(f"Adding {filename} -> {target_dir}")
         added_files.append((file_path, target_dir))
 
-# Find user site-packages so PyInstaller can collect packages installed there
+# Aggressively find all potential site-packages locations
+extra_paths = [base_path]
+
+# Add standard site.getusersitepackages()
 import site
 user_site = site.getusersitepackages()
-extra_paths = [base_path]
-if isinstance(user_site, str) and os.path.isdir(user_site):
+if user_site and os.path.isdir(user_site):
     extra_paths.append(user_site)
-    print(f"Adding user site-packages: {user_site}")
+
+# Hard-coded fallbacks for common Windows paths (Python 3.13 and 3.14)
+roaming_base = os.path.expanduser('~\\AppData\\Roaming\\Python')
+if os.path.isdir(roaming_base):
+    for ver in ['Python313', 'Python314']:
+        p = os.path.join(roaming_base, ver, 'site-packages')
+        if os.path.isdir(p) and p not in extra_paths:
+            extra_paths.append(p)
+            print(f"Added hard-coded site-packages: {p}")
+
+# Also check Local AppData (Miniconda / PSF versions)
+local_base = os.path.expanduser('~\\AppData\\Local\\Python')
+if os.path.isdir(local_base):
+    for ver in ['Python313', 'Python314']:
+        p = os.path.join(local_base, ver, 'site-packages')
+        if os.path.isdir(p) and p not in extra_paths:
+            extra_paths.append(p)
+
+print(f"Final PyInstaller Pathex: {extra_paths}")
 
 a = Analysis(
     ['main.py'],
