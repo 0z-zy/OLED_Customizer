@@ -8,8 +8,18 @@ block_cipher = None
 # Base path for the project
 base_path = os.getcwd()
 
-# Dynamically find HardwareMonitor DLLs
+# Dynamically find HardwareMonitor package and DLLs
 hw_monitor_dlls = []
+hw_monitor_pkg_datas = []
+
+# Paths to search for the HardwareMonitor package (miniconda first - that's where it's installed)
+hw_search_paths = [
+    'C:\\ProgramData\\miniconda3\\Lib\\site-packages',
+    os.path.expanduser('~\\AppData\\Roaming\\Python\\Python313\\site-packages'),
+    os.path.expanduser('~\\AppData\\Roaming\\Python\\Python314\\site-packages'),
+    os.path.expanduser('~\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python313\\site-packages'),
+]
+
 try:
     import HardwareMonitor
     hw_path = os.path.dirname(HardwareMonitor.__file__)
@@ -18,19 +28,28 @@ try:
         hw_monitor_dlls = [(dll_pattern, 'HardwareMonitor/lib')]
         print(f"Found HardwareMonitor DLLs at: {dll_pattern}")
 except ImportError:
-    # Try common fallback locations
-    fallback_paths = [
-        os.path.expanduser('~\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python313\\site-packages\\HardwareMonitor\\lib\\*.dll'),
-        os.path.expanduser('~\\AppData\\Roaming\\Python\\Python314\\site-packages\\HardwareMonitor\\lib\\*.dll'),
-        os.path.expanduser('~\\AppData\\Roaming\\Python\\Python313\\site-packages\\HardwareMonitor\\lib\\*.dll'),
-    ]
-    for path in fallback_paths:
-        if glob.glob(path):
-            hw_monitor_dlls = [(path, 'HardwareMonitor/lib')]
-            print(f"Found HardwareMonitor DLLs at fallback: {path}")
+    # HardwareMonitor not in current Python - find it manually
+    hw_pkg_found = False
+    for sp in hw_search_paths:
+        hw_pkg_dir = os.path.join(sp, 'HardwareMonitor')
+        if os.path.isdir(hw_pkg_dir):
+            print(f"Found HardwareMonitor package at: {hw_pkg_dir}")
+            hw_pkg_found = True
+            # Collect all files from the package
+            for root, dirs, files in os.walk(hw_pkg_dir):
+                # Skip __pycache__
+                dirs[:] = [d for d in dirs if d != '__pycache__']
+                for f in files:
+                    if f.endswith('.pyc'): continue
+                    full = os.path.join(root, f)
+                    rel_dir = os.path.relpath(root, sp)
+                    if 'lib' in rel_dir.split(os.sep) and f.endswith('.dll'):
+                        hw_monitor_dlls.append((full, rel_dir))
+                    else:
+                        hw_monitor_pkg_datas.append((full, rel_dir))
             break
-    if not hw_monitor_dlls:
-        print("WARNING: HardwareMonitor DLLs not found - hardware monitoring may not work!")
+    if not hw_pkg_found:
+        print("WARNING: HardwareMonitor package not found - hardware monitoring will not work!")
 
 from PyInstaller.utils.hooks import collect_all
 
@@ -62,7 +81,7 @@ for pkg in problem_pkgs:
 added_files = [
     ('version.py', '.'),
     ('src/lib/PresentMon.dll', 'src/lib'),
-] + hw_monitor_dlls + extra_datas
+] + hw_monitor_dlls + hw_monitor_pkg_datas + extra_datas
 
 print(f"Collected {len(extra_datas)} extra data files, {len(extra_binaries)} binaries, {len(extra_hidden)} hidden imports")
 

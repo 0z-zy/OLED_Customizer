@@ -25,3 +25,4 @@ cert.pem
 key.pem
 .lock
 debug_fs.txt
+build.ps1
