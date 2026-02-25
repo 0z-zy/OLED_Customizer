@@ -77,7 +77,7 @@ def start_update_process():
         # Also try via command-line (more reliable for ADS removal)
         try:
             subprocess.run(["powershell", "-Command", f'Unblock-File -Path "{new_exe}"'], 
-                          capture_output=True, timeout=5)
+                          capture_output=True, timeout=5, creationflags=subprocess.CREATE_NO_WINDOW)
         except Exception:
             pass
                 
