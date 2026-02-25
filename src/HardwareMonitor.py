@@ -141,6 +141,15 @@ class _LHMWorker:
                 if "gpu" in hw:
                     gpus.add(hn)
         return sorted(list(gpus))
+        
+    def stop(self):
+        """Signals worker thread to stop and releases COM locks."""
+        self._running = False
+        try:
+            if self._computer:
+                self._computer.Close()
+        except Exception:
+            pass
 
 
 # Global worker instance
@@ -229,6 +238,16 @@ class HardwareMonitor:
         except:
             pass
         return None
+
+    def stop(self):
+        """Stop all background workers to release file handles to PyInstaller MEIPASS."""
+        try:
+            self.fps_monitor.stop()
+            _lhm_worker.stop()
+            if self._wmi:
+                self._wmi = None
+        except Exception:
+            pass
 
     def get_image(self):
         w, h = self.config.width, self.config.height

@@ -100,21 +100,53 @@ def start_update_process():
             # 2. Put the new executable in the original spot
             os.rename(new_exe, current_exe)
             
-            # 3. Launch the new version directly using OS-level Breakaway
+            # 3. Launch the new version directly using OS-level Breakaway and UAC Elevation
             # We explicitly DO NOT strip _MEIPASS because the new instance needs it 
             # to know where its bundled fonts/assets are extracted.
-            # Instead, we use CREATE_BREAKAWAY_FROM_JOB (0x01000000) to prevent the
-            # OS from inheriting the parent's failing DLL environment.
-            logger.info("Launching new executable via Job Breakaway...")
+            # We use ShellExecuteW with "runas" to guarantee UAC elevation.
+            logger.info("Launching new executable requesting UAC Elevation...")
             
-            # 0x01000000 = CREATE_BREAKAWAY_FROM_JOB
-            # 0x00000008 = DETACHED_PROCESS
-            creation_flags = 0x01000000 | 0x00000008
+            import ctypes
+            # SW_SHOWNORMAL = 1
+            ret = ctypes.windll.shell32.ShellExecuteW(
+                None, 
+                "runas", 
+                current_exe, 
+                None, 
+                os.path.dirname(current_exe), 
+                1
+            )
             
-            subprocess.Popen([current_exe], creationflags=creation_flags)
+            if ret <= 32:
+                 logger.warning(f"ShellExecuteW runas failed (code {ret}). Falling back to Popen.")
+                 creation_flags = 0x01000000 | 0x00000008 # CREATE_BREAKAWAY_FROM_JOB | DETACHED_PROCESS
+                 subprocess.Popen([current_exe], creationflags=creation_flags)
             
-            # 4. Exit immediately so the new process can run clean
-            os._exit(0)
+            # 4. Gracefully release all file handles to _MEIPASS
+            # If we rigidly call os._exit(0), ctypes holds onto PresentMon.dll, preventing
+            # PyInstaller's C-level bootloader from deleting the temporary `_MEIxxxxx` folder.
+            # We must explicitly try to free the DLL and use sys.exit(0) to trigger atexit hooks.
+            logger.info("Releasing DLL locks and shutting down gracefully...")
+            
+            try:
+                from src.fps_monitor import FPSMonitor
+                fps = FPSMonitor()
+                if fps._lib:
+                    import ctypes
+                    # FreeLibrary properly unloads the DLL handle
+                    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+                    kernel32.FreeLibrary(fps._lib._handle)
+            except Exception:
+                pass
+                
+            try:
+                # Tell background hardware threads to shut down and release WMI/COM locks
+                from src.HardwareMonitor import _lhm_worker
+                _lhm_worker.stop()
+            except Exception:
+                pass
+
+            sys.exit(0)
              
         except Exception as e:
             logger.error(f"In-Place update failed: {e}")
