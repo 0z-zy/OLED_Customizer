@@ -130,11 +130,32 @@ def toggle_startup(icon):
     pass
     
 def self_update_logic():
+    import ctypes
+    MB_OK = 0x00
+    MB_YESNO = 0x04
+    MB_ICONINFO = 0x40
+    MB_ICONQUESTION = 0x20
+    IDYES = 6
+    
     available, latest = is_update_available()
     if available:
-        start_update_process()
+        result = ctypes.windll.user32.MessageBoxW(
+            0,
+            f"A new version is available: v{latest}\n\n"
+            "The app will download the update, close, and restart automatically.\n\n"
+            "Update now?",
+            "OLED Customizer - Update Available",
+            MB_YESNO | MB_ICONQUESTION
+        )
+        if result == IDYES:
+            start_update_process()
     else:
-        logger.info("Update check: Already up to date!")
+        ctypes.windll.user32.MessageBoxW(
+            0,
+            "You're running the latest version! ✓",
+            "OLED Customizer - Up to Date",
+            MB_OK | MB_ICONINFO
+        )
 
 def toggle_debug(icon):
     enable = not is_debug_enabled()
