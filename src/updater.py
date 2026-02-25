@@ -81,8 +81,8 @@ def start_update_process():
         except Exception:
             pass
                 
-        # Plan L: In-Place Update (No External Scripts)
-        logger.info("Executing In-Place Swap (Plan L)...")
+        # Plan M: In-Place Update with Job Breakaway
+        logger.info("Executing In-Place Swap (Plan M)...")
         try:
             old_exe = current_exe + ".old"
             
@@ -100,17 +100,20 @@ def start_update_process():
             # 2. Put the new executable in the original spot
             os.rename(new_exe, current_exe)
             
-            # 3. Aggressively strip PyInstaller environment variables
-            # _MEIPASS2 is the main culprit causing child-process DLL crashes.
-            env = os.environ.copy()
-            for var in ['_MEIPASS', '_MEIPASS2', 'PYI_CHILD_PATH', 'PYTHONHOME', 'PYTHONPATH']:
-                env.pop(var, None)
+            # 3. Launch the new version directly using OS-level Breakaway
+            # We explicitly DO NOT strip _MEIPASS because the new instance needs it 
+            # to know where its bundled fonts/assets are extracted.
+            # Instead, we use CREATE_BREAKAWAY_FROM_JOB (0x01000000) to prevent the
+            # OS from inheriting the parent's failing DLL environment.
+            logger.info("Launching new executable via Job Breakaway...")
             
-            # 4. Launch the new version directly
-            logger.info("Launching new executable in detached process...")
-            subprocess.Popen([current_exe], env=env, creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
+            # 0x01000000 = CREATE_BREAKAWAY_FROM_JOB
+            # 0x00000008 = DETACHED_PROCESS
+            creation_flags = 0x01000000 | 0x00000008
             
-            # 5. Exit immediately so the new process can run clean
+            subprocess.Popen([current_exe], creationflags=creation_flags)
+            
+            # 4. Exit immediately so the new process can run clean
             os._exit(0)
              
         except Exception as e:
