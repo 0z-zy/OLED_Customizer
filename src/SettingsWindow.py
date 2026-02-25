@@ -550,20 +550,30 @@ class SettingsGUI:
         pick_btn.pack(side="right", padx=5)
 
     def _check_updates(self):
+        self.update_btn.configure(state="disabled")
+        self.update_btn_text.set("Checking...")
+        
         def worker():
-            self.update_btn.configure(state="disabled")
-            self.update_btn_text.set("Checking...")
+            try:
+                available, latest = is_update_available()
+            except Exception:
+                available, latest = False, None
             
-            available, latest = is_update_available()
+            # All GUI updates MUST happen on the main thread via root.after()
+            def update_gui():
+                if available:
+                    self.update_btn_text.set(f"Update to v{latest}")
+                    self.update_btn.configure(state="normal", bg=Colors.ACCENT_PRIMARY, fg="black", 
+                                              command=lambda: threading.Thread(target=start_update_process, daemon=True).start())
+                else:
+                    self.update_btn_text.set("Up to Date ✓")
+                    self.root.after(3000, lambda: [self.update_btn_text.set("Check for Updates"), 
+                                                  self.update_btn.configure(state="normal")])
             
-            if available:
-                self.update_btn_text.set(f"Update to v{latest}")
-                self.update_btn.configure(state="normal", bg=Colors.ACCENT_PRIMARY, fg="black", 
-                                          command=lambda: threading.Thread(target=start_update_process, daemon=True).start())
-            else:
-                self.update_btn_text.set("Up to Date")
-                self.root.after(3000, lambda: [self.update_btn_text.set("Check for Updates"), 
-                                              self.update_btn.configure(state="normal")])
+            try:
+                self.root.after(0, update_gui)
+            except Exception:
+                pass
         
         threading.Thread(target=worker, daemon=True).start()
 
