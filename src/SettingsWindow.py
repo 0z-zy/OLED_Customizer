@@ -550,8 +550,9 @@ class SettingsGUI:
         pick_btn.pack(side="right", padx=5)
 
     def _check_updates(self):
-        self.update_btn.configure(state="disabled")
-        self.update_btn_text.set("Checking...")
+        # Visual feedback immediately (keep button colored, don't grey it out)
+        self.update_btn_text.set("⏳ Checking...")
+        self.update_btn.configure(state="disabled", disabledforeground=Colors.TEXT_DIM)
         
         def worker():
             try:
@@ -562,13 +563,15 @@ class SettingsGUI:
             # All GUI updates MUST happen on the main thread via root.after()
             def update_gui():
                 if available:
-                    self.update_btn_text.set(f"Update to v{latest}")
-                    self.update_btn.configure(state="normal", bg=Colors.ACCENT_PRIMARY, fg="black", 
+                    self.update_btn_text.set(f"⬆ Update to v{latest}")
+                    self.update_btn.configure(state="normal", bg="#27ae60", fg="white", 
                                               command=lambda: threading.Thread(target=start_update_process, daemon=True).start())
                 else:
-                    self.update_btn_text.set("Up to Date ✓")
-                    self.root.after(3000, lambda: [self.update_btn_text.set("Check for Updates"), 
-                                                  self.update_btn.configure(state="normal")])
+                    self.update_btn_text.set("✅ Up to Date!")
+                    self.update_btn.configure(state="normal", bg="#27ae60", fg="white")
+                    self.root.after(4000, lambda: [self.update_btn_text.set("Check for Updates"), 
+                                                  self.update_btn.configure(bg=Colors.CARD_BG, fg=Colors.TEXT_MAIN,
+                                                                           command=self._check_updates)])
             
             try:
                 self.root.after(0, update_gui)
