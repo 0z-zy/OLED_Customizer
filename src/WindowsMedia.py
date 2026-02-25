@@ -1,13 +1,69 @@
 import asyncio
+from datetime import datetime, timezone
 from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
 from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionPlaybackStatus
 import logging
 
 logger = logging.getLogger("OLED Customizer.WindowsMedia")
 
+# Only these statuses mean the session has real, active media
+VALID_STATUSES = {
+    GlobalSystemMediaTransportControlsSessionPlaybackStatus.PLAYING,
+    GlobalSystemMediaTransportControlsSessionPlaybackStatus.PAUSED,
+}
+
 class WindowsMedia:
     def __init__(self):
         self.manager = None
+
+    def _is_valid_session(self, session):
+        """Check if an SMTC session is real and not stale/garbage.
+        Returns False for dead sessions like Discord showing 0:15/0:15."""
+        try:
+            info = session.get_playback_info()
+            if not info:
+                return False
+            
+            status = info.playback_status
+            
+            # Filter 1: Only trust PLAYING or PAUSED sessions.
+            # STOPPED, CLOSED, OPENED, CHANGING are dead/transitional.
+            if status not in VALID_STATUSES:
+                return False
+            
+            # Filter 2: Timeline sanity — if position == duration and not playing,
+            # the track is finished/stuck (like Discord's 0:15/0:15).
+            try:
+                timeline = session.get_timeline_properties()
+                if timeline and status != GlobalSystemMediaTransportControlsSessionPlaybackStatus.PLAYING:
+                    pos = timeline.position
+                    end = timeline.end_time
+                    # Convert to seconds for comparison
+                    pos_s = pos.total_seconds() if hasattr(pos, 'total_seconds') else (pos / 10_000_000 if isinstance(pos, int) else 0)
+                    end_s = end.total_seconds() if hasattr(end, 'total_seconds') else (end / 10_000_000 if isinstance(end, int) else 0)
+                    if end_s > 0 and abs(pos_s - end_s) < 0.5:
+                        # Position is at the end — track is finished, skip it
+                        return False
+            except Exception:
+                pass  # timeline check is best-effort
+
+            # Filter 3: Staleness — if last update was >60s ago and not playing,
+            # the session is stale.
+            if status != GlobalSystemMediaTransportControlsSessionPlaybackStatus.PLAYING:
+                try:
+                    timeline = session.get_timeline_properties()
+                    if timeline and hasattr(timeline, 'last_updated_time') and timeline.last_updated_time:
+                        age = (datetime.now(timezone.utc) - timeline.last_updated_time).total_seconds()
+                        if age > 60:
+                            return False
+                except Exception:
+                    pass  # staleness check is best-effort
+
+            return True
+        except (OSError, RuntimeError):
+            return False
+        except Exception:
+            return False
 
     async def _ensure_manager(self):
         if self.manager:
@@ -50,30 +106,38 @@ class WindowsMedia:
             session_list = list(sessions) if sessions else []
             # logger.info(f"SMTC Sessions Found: {len(session_list)}")
             
-            # Priority 1: Find a PLAYING session
+            # Priority 1: Find a PLAYING session (that passes validation)
             if sessions:
                 for session in sessions:
                     try:
+                        if not self._is_valid_session(session):
+                            continue
                         info = session.get_playback_info()
-                        # source_id = session.source_app_user_model_id or "unknown"
-                        # status_name = info.playback_status.name if info else "none"
-                        # logging.debug(f"  Session: {source_id} -> Status: {status_name}")
                         if info and info.playback_status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.PLAYING:
                             current_session = session
-                            # DON'T break, keep logging all
                     except (OSError, RuntimeError):
                         # Skip sessions with COM errors
                         continue
             
-            # Priority 2: Fallback to system "Current" session
+            # Priority 2: Fallback — find any valid PAUSED session
+            if not current_session and sessions:
+                for session in sessions:
+                    try:
+                        if self._is_valid_session(session):
+                            current_session = session
+                            break
+                    except (OSError, RuntimeError):
+                        continue
+            
+            # Priority 3: Fallback to system "Current" session (also validated)
             if not current_session:
                 try:
-                    current_session = self.manager.get_current_session()
+                    fallback = self.manager.get_current_session()
+                    if fallback and self._is_valid_session(fallback):
+                        current_session = fallback
                 except (OSError, RuntimeError):
                     self.manager = None
                     return {}
-                # if current_session:
-                #     logging.debug(f"  Fallback to get_current_session: {current_session.source_app_user_model_id}")
             
             # If still nothing, bail
             if not current_session:
@@ -125,7 +189,7 @@ class WindowsMedia:
                 
                 # EXTRAPOLATION: SMTC updates position only on state change.
                 # We must add (Now - LastUpdatedTime) if playing.
-                from datetime import datetime, timezone
+                # datetime already imported at top of file
                 
                 # Check if we are playing
                 is_playing = False

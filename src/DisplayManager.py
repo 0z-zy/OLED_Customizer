@@ -494,17 +494,11 @@ class DisplayManager:
         try:
             title = (data.get("title") or "").strip()
             artist = (data.get("artist") or "").strip()
-            progress = int(data.get("progress") or 0)
-            duration = int(data.get("duration") or 1)
+            raw_progress = data.get("progress")
+            raw_duration = data.get("duration")
             paused = bool(data.get("paused", False))
 
-            if duration <= 0:
-                duration = 1
-                progress = 0
-            if progress < 0:
-                progress = 0
-
-            # ✅ sadece değişince update_song (yoksa scroll her seferinde sıfırlanır)
+            # Check if song changed FIRST (before resolving duration)
             changed = True
             try:
                 cur_title = player.title.content
@@ -513,10 +507,52 @@ class DisplayManager:
             except Exception:
                 changed = True
 
+            # If SMTC returned -1 (unknown timeline) AND same song: keep cached values
+            # If song changed with no timeline: update title/artist only, don't reset time
+            if raw_duration is not None and int(raw_duration) == -1:
+                if not changed:
+                    # Same song — keep the player's existing cached data
+                    duration = max(player.song_duration, 1)
+                    progress = player.song_position if (raw_progress is None or int(raw_progress) == -1) else max(int(raw_progress), 0)
+                else:
+                    # New song but no timeline data from SMTC
+                    # Update title/artist/source immediately, but DON'T reset duration
+                    # to avoid 00:00/00:00 flash. Duration will come from Spotify API shortly.
+                    player.title.set_text(title)
+                    player.artist.set_text(artist)
+                    player.source = source
+                    player.song_position = 0
+                    player.changed = True
+                    player.step = 0
+                    player.title.set_step(0)
+                    player.artist.set_step(0)
+                    # Skip the rest — don't call update_song with bad duration
+                    if not player.paused and paused:
+                        player.pause_started = now_ms
+                    elif player.paused and not paused:
+                        player.pause_started = 0
+                    player.set_paused(paused)
+                    return
+            else:
+                progress = int(raw_progress or 0)
+                duration = int(raw_duration or 1)
+
+            if duration <= 0:
+                duration = 1
+                progress = 0
+            if progress < 0:
+                progress = 0
+
             if changed:
                 player.update_song(title, artist, progress, duration, paused, source)
             else:
-                # aynı içerik: sadece ilerleme
+                # Same song: update duration if a better value arrived
+                # (e.g. SMTC set it to 1 initially, then Spotify API sent the real value)
+                if duration > 1 and duration != player.song_duration:
+                    player.song_duration = duration
+                    player.changed = True
+
+                # Update progress position (jitter-free sync)
                 if not paused:
                     # --- JITTER-FREE SYNC BAŞLANGIÇ ---
                     current_pos = player.song_position
