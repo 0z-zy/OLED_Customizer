@@ -27,6 +27,21 @@ from src.Config import Config
 from src.DisplayManager import DisplayManager
 from src.utils import fetch_app_data_path
 
+def cleanup_old_updates():
+    """Removes the leftover .old executable from an in-place update if it exists."""
+    if getattr(sys, 'frozen', False):
+        try:
+            exe_path = sys.executable
+            old_path = exe_path + ".old"
+            if os.path.exists(old_path):
+                os.remove(old_path)
+                # logging isn't set up yet, so we just silently remove it
+        except Exception:
+            pass
+
+# Run cleanup immediately
+cleanup_old_updates()
+
 
 
 def setup_logging(debug=False):
