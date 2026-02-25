@@ -66,6 +66,20 @@ def start_update_process():
         with open(new_exe, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
+        
+        # Remove "Mark of the Web" — Windows blocks DLL extraction from internet-downloaded exes
+        try:
+            zone_file = new_exe + ":Zone.Identifier"
+            if os.path.exists(zone_file):
+                os.remove(zone_file)
+        except Exception:
+            pass
+        # Also try via command-line (more reliable for ADS removal)
+        try:
+            subprocess.run(["powershell", "-Command", f'Unblock-File -Path "{new_exe}"'], 
+                          capture_output=True, timeout=5)
+        except Exception:
+            pass
                 
         # 2. Create the batch script for replacement
         # This script waits for the main app to close, replaces the file, and restarts it.
