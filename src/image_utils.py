@@ -5,27 +5,38 @@ from PIL import Image
 
 def fetch_content_path(relative_path: str) -> str:
     """
-    Kaynak dosya yolunu döndürür.
-
-    EXE içinden:
-        <_MEIPASS>/content/<relative_path without ./ >
-    Normal python:
-        <proje_kökü>/content/<relative_path without ./ >
+    Robustly finds the path to a resource in the 'content' directory.
+    Checks:
+    1. _MEIPASS (PyInstaller temp folder)
+    2. Executable directory
+    3. Project root (CWD or script dir)
     """
+    # Normalize path separators and remove leading slashes
+    relative_path = os.path.normpath(relative_path.lstrip("./\\"))
 
-    # relative_path başındaki ./ veya \ gibi şeyleri temizle
-    relative_path = relative_path.lstrip("./\\")  # "fonts/..." veya "assets/..." gibi kalır
-
+    possible_bases = []
+    
     if getattr(sys, "frozen", False):
-        # PyInstaller exe içi
-        base_path = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
-        content_base = os.path.join(base_path, "content")
+        # 1. PyInstaller MEIPASS
+        if hasattr(sys, "_MEIPASS"):
+            possible_bases.append(sys._MEIPASS)
+        # 2. EXE directory
+        possible_bases.append(os.path.dirname(sys.executable))
     else:
-        # Normal python: src/ klasöründen proje köküne çık
-        base_dir = os.path.dirname(os.path.dirname(__file__))  # .../SpotifyLinke
-        content_base = os.path.join(base_dir, "content")
+        # 3. Source directory
+        possible_bases.append(os.path.dirname(os.path.dirname(__file__)))
+    
+    # 4. Final fallback: Current Working Directory
+    possible_bases.append(os.getcwd())
 
-    return os.path.join(content_base, relative_path)
+    for base in possible_bases:
+        full_path = os.path.normpath(os.path.join(base, "content", relative_path))
+        if os.path.exists(full_path):
+            return full_path
+            
+    # If not found, return the most likely path anyway (and let the caller fail or use fallback)
+    default_base = possible_bases[0] if possible_bases else "."
+    return os.path.normpath(os.path.join(default_base, "content", relative_path))
 
 
 def convert_color(o):

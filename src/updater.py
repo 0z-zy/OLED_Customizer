@@ -81,23 +81,48 @@ def start_update_process():
         except Exception:
             pass
                 
-        # 2. Create the batch script for replacement
-        # This script waits for the main app to close, replaces the file, and restarts it.
-        batch_script = current_exe + "_update.bat"
-        with open(batch_script, 'w') as f:
-            f.write(f'@echo off\n')
-            f.write(f'taskkill /F /PID {os.getpid()} >nul 2>&1\n')
-            f.write(f'timeout /t 2 /nobreak >nul\n') # Wait for app to close
-            f.write(f'del "{current_exe}"\n')
-            f.write(f'move /Y "{new_exe}" "{current_exe}"\n')
-            f.write(f'start "" "{current_exe}"\n')
-            f.write(f'del "%~f0"\n') # Self-delete batch file
+        # Plan L: In-Place Update (No External Scripts)
+        logger.info("Executing In-Place Swap (Plan L)...")
+        try:
+            old_exe = current_exe + ".old"
             
-        # 3. Launch the batch script and exit
-        logger.info("Triggering update script...")
-        subprocess.Popen([batch_script], shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
-        os._exit(0)
-        
+            # Clean up previous old file if it exists
+            if os.path.exists(old_exe):
+                try:
+                    os.remove(old_exe)
+                except Exception as e:
+                    logger.warning(f"Could not remove previous .old file: {e}")
+            
+            # 1. Rename the currently running executable to free up its name
+            # Windows allows renaming open files, but not deleting them.
+            os.rename(current_exe, old_exe)
+            
+            # 2. Put the new executable in the original spot
+            os.rename(new_exe, current_exe)
+            
+            # 3. Aggressively strip PyInstaller environment variables
+            # _MEIPASS2 is the main culprit causing child-process DLL crashes.
+            env = os.environ.copy()
+            for var in ['_MEIPASS', '_MEIPASS2', 'PYI_CHILD_PATH', 'PYTHONHOME', 'PYTHONPATH']:
+                env.pop(var, None)
+            
+            # 4. Launch the new version directly
+            logger.info("Launching new executable in detached process...")
+            subprocess.Popen([current_exe], env=env, creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
+            
+            # 5. Exit immediately so the new process can run clean
+            os._exit(0)
+             
+        except Exception as e:
+            logger.error(f"In-Place update failed: {e}")
+            # Try to undo the rename if the swap failed
+            try:
+                if os.path.exists(old_exe) and not os.path.exists(current_exe):
+                    os.rename(old_exe, current_exe)
+            except:
+                pass
+            return False
+            
     except Exception as e:
         logger.error(f"Update failed: {e}")
         return False

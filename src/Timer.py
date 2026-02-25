@@ -20,11 +20,22 @@ class Timer:
         self.use_turkish_days = use_turkish_days
         self.style = style
         
-        # Instance-level fonts (not shared across threads - prevents GC crashes)
-        self.FONT_DIGI_BIG = ImageFont.truetype(font=fetch_content_path('fonts/DS-DIGIB.ttf'), size=24)
-        self.FONT_DIGI_MED = ImageFont.truetype(font=fetch_content_path('fonts/DS-DIGIB.ttf'), size=20)
-        self.FONT_DIGI_SMALL = ImageFont.truetype(font=fetch_content_path('fonts/DS-DIGIB.ttf'), size=14)
-        self.FONT_HUGE = ImageFont.truetype(font=fetch_content_path('fonts/DS-DIGIB.ttf'), size=38)
+        # Instance-level fonts with Safety Fallbacks
+        def safe_load_font(path, size):
+            try:
+                return ImageFont.truetype(font=path, size=size)
+            except Exception:
+                # Fallback to default if custom font fails
+                try:
+                    return ImageFont.load_default()
+                except:
+                    # Absolute emergency fallback
+                    return None
+
+        self.FONT_DIGI_BIG = safe_load_font(fetch_content_path('fonts/DS-DIGIB.ttf'), 24)
+        self.FONT_DIGI_MED = safe_load_font(fetch_content_path('fonts/DS-DIGIB.ttf'), 20)
+        self.FONT_DIGI_SMALL = safe_load_font(fetch_content_path('fonts/DS-DIGIB.ttf'), 14)
+        self.FONT_HUGE = safe_load_font(fetch_content_path('fonts/DS-DIGIB.ttf'), 38)
 
     def set_style(self, style):
         self.style = style
