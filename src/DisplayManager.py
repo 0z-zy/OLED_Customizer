@@ -95,6 +95,7 @@ class DisplayManager:
 
                     # --- Calculator toggle: Ctrl + calculator key ---
                     if self._ctrl_held and key == self.key_calculator_val:
+                        self._ctrl_held = False  # Consume the modifier to prevent stickiness
                         self._calculator_active = not self._calculator_active
                         if self._calculator_active:
                             self.calculator.clear()  # Fresh start every time
