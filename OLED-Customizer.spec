@@ -151,7 +151,7 @@ a = Analysis(
         'HardwareMonitor', 'HardwareMonitor.Hardware',
         'clr', 'pythonnet', 'tkinter', 'pynput', 'pynput.keyboard',
         'pynput.mouse', 'pynput.keyboard._win32', 'pynput.mouse._win32',
-        'src.SettingsWindow', 'wmi', 'OpenSSL', 'OpenSSL.crypto',
+        'src.SettingsWindow', 'src.Calculator', 'wmi', 'OpenSSL', 'OpenSSL.crypto',
         'OpenSSL.SSL', 'cryptography', 'pycaw', 'pycaw.pycaw', 'comtypes',
     ] + extra_hidden)),
     hookspath=[],

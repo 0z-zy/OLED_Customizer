@@ -7,6 +7,7 @@ from src.SpotifyAPI import SpotifyAPI
 from src.SpotifyPlayer import SpotifyPlayer
 from src.SteelSeriesAPI import SteelSeriesAPI
 from src.Timer import Timer
+from src.Calculator import Calculator
 from src.volume import VolumeOverlay
 from src.image_utils import convert_to_bitmap
 from src.UserPreferences import UserPreferences
@@ -28,6 +29,7 @@ logger = logging.getLogger("OLED Customizer")
 class State:
     SHOW_CLOCK = 0
     SHOW_PLAYER = 1
+    SHOW_CALCULATOR = 2
 
 
 class DisplayManager:
@@ -50,6 +52,9 @@ class DisplayManager:
             self.user_preferences.get_preference("use_turkish_days"),
             self.user_preferences.get_preference("clock_style"),
         )
+
+        self.calculator = Calculator(config)
+        self._calculator_active = False  # True when OLED is showing the calculator
 
         run_systray_async(self)
 
@@ -78,21 +83,67 @@ class DisplayManager:
             self._listener = None
             self.key_monitor_val = None
             self.key_mute_val = None
-            
+            self.key_calculator_val = None
+            # Track whether Ctrl is currently held for combo hotkeys (Ctrl+Insert)
+            self._ctrl_held = False
+
             def on_press(key):
                 try:
+                    # Track Ctrl modifier
+                    if key in (keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
+                        self._ctrl_held = True
+
+                    # --- Calculator toggle: Ctrl + calculator key ---
+                    if self._ctrl_held and key == self.key_calculator_val:
+                        self._calculator_active = not self._calculator_active
+                        if self._calculator_active:
+                            self.calculator.clear()  # Fresh start every time
+                            logger.info("Calculator activated")
+                        else:
+                            logger.info("Calculator deactivated")
+                        return
+
+                    # --- Calculator control keys (non-numpad) ---
+                    # Numpad digits/operators are caught by the raw Windows hook below.
+                    # Here we only handle Esc, Enter, Backspace, Delete.
+                    if self._calculator_active:
+                        if key == keyboard.Key.esc:
+                            self._calculator_active = False
+                            logger.info("Calculator exited via Escape")
+                            return
+                        if key == keyboard.Key.enter:
+                            self.calculator.key_input("enter")
+                            return
+                        if key == keyboard.Key.backspace:
+                            self.calculator.key_input("backspace")
+                            return
+                        if key == keyboard.Key.delete:
+                            self.calculator.key_input("delete")
+                            return
+
+                    # --- Normal hotkeys (always active) ---
                     if key == self.key_monitor_val:
                         self.hardware_monitor.trigger()
                     elif key == self.key_mute_val:
-                         logger.info("Mute key pressed - Toggling Mute")
-                         self.volume_overlay.toggle_mic_mute()
+                        logger.info("Mute key pressed - Toggling Mute")
+                        self.volume_overlay.toggle_mic_mute()
                 except Exception as e:
                     logger.error(f"Hotkey error: {e}")
-            
-            self._listener = keyboard.Listener(on_press=on_press)
+
+            def on_release(key):
+                try:
+                    if key in (keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
+                        self._ctrl_held = False
+                except Exception:
+                    pass
+
+            self._listener = keyboard.Listener(on_press=on_press, on_release=on_release)
             self._listener.daemon = True
             self._listener.start()
             logger.info("Keyboard listener started")
+
+            # Start the raw Windows hook for numpad suppression
+            Thread(target=self._numpad_hook_loop, daemon=True, name="Numpad-Hook").start()
         else:
             logger.warning("pynput not available, keyboard features disabled")
 
@@ -147,6 +198,146 @@ class DisplayManager:
         
         self.load_preferences()
 
+    # ------------------------------------------------------------------
+    # Raw Windows hook for numpad key suppression
+    # ------------------------------------------------------------------
+
+    def _numpad_hook_loop(self):
+        """
+        Installs a low-level Windows keyboard hook (WH_KEYBOARD_LL) via ctypes
+        to intercept and suppress numpad keys when calculator mode is active.
+
+        CRITICAL: Uses proper 64-bit types. On x64 Windows, LRESULT/LPARAM/WPARAM
+        are all 8 bytes. Using 4-byte c_long would corrupt the stack.
+        """
+        try:
+            import ctypes
+            from ctypes import wintypes, POINTER, Structure, byref
+
+            # Use WinDLL with use_last_error for proper error reporting
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+            # ---- Constants ----
+            WH_KEYBOARD_LL = 13
+            HC_ACTION = 0
+            WM_KEYDOWN = 0x0100
+            WM_SYSKEYDOWN = 0x0104
+
+            # Numpad VK codes (96..111) + VK_OEM_COMMA (188) + VK_OEM_PERIOD (190)
+            NUMPAD_VKS = set(range(96, 112))
+            NUMPAD_VKS.add(188)
+            NUMPAD_VKS.add(190)
+
+            NUMPAD_OP_MAP = {
+                107: "+", 109: "-", 106: "*", 111: "/",
+                110: ".", 108: ",",  # VK_SEPARATOR for European locales
+                188: ",",  # VK_OEM_COMMA
+                190: ".",  # VK_OEM_PERIOD
+            }
+
+            # ---- Struct for the hook data ----
+            class KBDLLHOOKSTRUCT(Structure):
+                _fields_ = [
+                    ("vkCode",      wintypes.DWORD),
+                    ("scanCode",    wintypes.DWORD),
+                    ("flags",       wintypes.DWORD),
+                    ("time",        wintypes.DWORD),
+                    ("dwExtraInfo", ctypes.c_void_p),
+                ]
+
+            # ---- 64-bit safe callback type ----
+            # On x64: LRESULT = c_longlong, WPARAM = c_ulonglong, LPARAM = c_longlong
+            LRESULT = wintypes.LPARAM   # c_longlong on 64-bit
+            HOOKPROC = ctypes.CFUNCTYPE(
+                LRESULT,                # return type (8 bytes on x64)
+                ctypes.c_int,           # nCode
+                wintypes.WPARAM,        # wParam
+                wintypes.LPARAM,        # lParam
+            )
+
+            # ---- Set proper function signatures ----
+            kernel32.GetModuleHandleW.restype = ctypes.c_void_p
+            kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+
+            user32.SetWindowsHookExW.restype = ctypes.c_void_p
+            user32.SetWindowsHookExW.argtypes = [
+                ctypes.c_int, HOOKPROC, ctypes.c_void_p, wintypes.DWORD
+            ]
+
+            user32.CallNextHookEx.restype = LRESULT
+            user32.CallNextHookEx.argtypes = [
+                ctypes.c_void_p, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
+            ]
+
+            user32.UnhookWindowsHookEx.restype = wintypes.BOOL
+            user32.UnhookWindowsHookEx.argtypes = [ctypes.c_void_p]
+
+            user32.GetMessageW.argtypes = [
+                POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT
+            ]
+            user32.TranslateMessage.argtypes = [POINTER(wintypes.MSG)]
+            user32.DispatchMessageW.argtypes = [POINTER(wintypes.MSG)]
+
+            # ---- The hook callback ----
+            @HOOKPROC
+            def _hook_callback(nCode, wParam, lParam):
+                try:
+                    if nCode == HC_ACTION and self._calculator_active:
+                        # Read VK code and flags directly from memory at lParam address
+                        # KBDLLHOOKSTRUCT layout: vkCode(4) scanCode(4) flags(4) ...
+                        addr = lParam & 0xFFFFFFFFFFFFFFFF  # ensure unsigned
+                        vk = ctypes.c_uint32.from_address(addr).value
+                        flags = ctypes.c_uint32.from_address(addr + 8).value
+
+                        is_numpad = vk in NUMPAD_VKS
+                        is_numpad_enter = (vk == 13 and (flags & 0x01))
+
+                        if is_numpad or is_numpad_enter:
+                            # Feed calculator on key-DOWN only
+                            if wParam in (WM_KEYDOWN, WM_SYSKEYDOWN):
+                                if 96 <= vk <= 105:
+                                    self.calculator.key_input(str(vk - 96))
+                                elif vk in NUMPAD_OP_MAP:
+                                    self.calculator.key_input(NUMPAD_OP_MAP[vk])
+                                elif is_numpad_enter:
+                                    self.calculator.key_input("enter")
+
+                            return LRESULT(1).value  # SUPPRESS
+                except Exception:
+                    pass  # Never let an exception escape the hook callback
+
+                return user32.CallNextHookEx(None, nCode, wParam, lParam)
+
+            # ---- Install ----
+            # Must keep callback reference alive (prevent GC)
+            self._numpad_hook_proc = _hook_callback
+
+            hmod = kernel32.GetModuleHandleW(None)
+            hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, _hook_callback, hmod, 0)
+
+            if not hook:
+                err = ctypes.get_last_error()
+                logger.error(f"SetWindowsHookExW failed (error {err})")
+                return
+
+            logger.info("Numpad suppression hook installed OK")
+
+            # ---- Message pump (required to keep LL hook alive) ----
+            msg = wintypes.MSG()
+            while user32.GetMessageW(byref(msg), None, 0, 0) != 0:
+                user32.TranslateMessage(byref(msg))
+                user32.DispatchMessageW(byref(msg))
+
+            user32.UnhookWindowsHookEx(hook)
+            logger.info("Numpad hook removed")
+
+        except Exception as e:
+            # This thread is non-critical — never crash the app
+            logger.error(f"Numpad hook thread failed: {e}", exc_info=True)
+
+    # ------------------------------------------------------------------
+
     def load_preferences(self):
         self.user_preferences.load_preferences()
         self.update_preferences()
@@ -186,7 +377,8 @@ class DisplayManager:
         # Hotkeys
         self.key_monitor_val = self._parse_key(self.user_preferences.get_preference("hotkey_monitor"))
         self.key_mute_val = self._parse_key(self.user_preferences.get_preference("hotkey_mute"))
-        logger.info(f"Hotkeys bound: Monitor={self.key_monitor_val}, Mute={self.key_mute_val}")
+        self.key_calculator_val = self._parse_key(self.user_preferences.get_preference("hotkey_calculator"))
+        logger.info(f"Hotkeys bound: Monitor={self.key_monitor_val}, Mute={self.key_mute_val}, Calculator={self.key_calculator_val}")
         
         self.auto_launch_gg = self.user_preferences.get_preference("auto_launch_gg")
 
@@ -401,8 +593,12 @@ class DisplayManager:
 
             frame_data = None
 
+            # Calculator overlay takes priority over everything when active
+            if self._calculator_active:
+                img = self.calculator.get_image()
+                frame_data = convert_to_bitmap(img.getdata())
             # Hardware monitor overlay > volume overlay > everything
-            if self.display_hw_monitor or self.hardware_monitor.should_display():
+            elif self.display_hw_monitor or self.hardware_monitor.should_display():
                 img = self.hardware_monitor.get_image()
                 frame_data = convert_to_bitmap(img.getdata())
             # volume overlay > everything else

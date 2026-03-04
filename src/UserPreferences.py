@@ -40,7 +40,8 @@ class UserPreferences:
         "player_style": "Standard",
         "hw_polling_interval": 1000,
         "show_game_fps": False,
-        "selected_gpu": "Auto"
+        "selected_gpu": "Auto",
+        "hotkey_calculator": "Key.insert"
     }
 
     def __init__(self):

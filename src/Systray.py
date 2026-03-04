@@ -43,6 +43,7 @@ def toggle_clock(icon):
     if not was_on:
         icon.manager.display_hw_monitor = False
         icon.manager.user_preferences.preferences["display_hw_monitor"] = False
+        icon.manager._calculator_active = False  # Also disable calculator
     
     icon.manager.display_clock = not was_on
     icon.manager.user_preferences.preferences["display_timer"] = icon.manager.display_clock
@@ -73,11 +74,29 @@ def toggle_hw_monitor(icon):
     if not was_on:
         icon.manager.display_clock = False
         icon.manager.user_preferences.preferences["display_timer"] = False
+        icon.manager._calculator_active = False  # Also disable calculator
 
     icon.manager.display_hw_monitor = not was_on
     icon.manager.user_preferences.preferences["display_hw_monitor"] = icon.manager.display_hw_monitor
     icon.manager.user_preferences.save_preferences()
     icon.manager.update_preferences()
+    icon.update_menu()
+
+def toggle_calculator(icon):
+    if not icon.manager.user_preferences.valid:
+        return
+
+    # Exclusive logic: if enabling calculator, disable clock + hw monitor
+    activating = not icon.manager._calculator_active
+    if activating:
+        icon.manager.display_clock = False
+        icon.manager.user_preferences.preferences["display_timer"] = False
+        icon.manager.display_hw_monitor = False
+        icon.manager.user_preferences.preferences["display_hw_monitor"] = False
+        icon.manager.calculator.clear()
+
+    icon.manager._calculator_active = activating
+    icon.manager.user_preferences.save_preferences()
     icon.update_menu()
 
 def toggle_fps(icon):
@@ -411,6 +430,12 @@ def run_systray_async(display_manager):
             "Show Game FPS",
             toggle_fps,
             checked=lambda item: display_manager.user_preferences.preferences.get("show_game_fps", False),
+            enabled=lambda item: display_manager.enabled,
+        ),
+        Item(
+            "🖩 Calculator Mode",
+            toggle_calculator,
+            checked=lambda item: display_manager._calculator_active,
             enabled=lambda item: display_manager.enabled,
         ),
         Menu.SEPARATOR,

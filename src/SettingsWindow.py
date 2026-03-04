@@ -278,6 +278,7 @@ class SettingsGUI:
         # Hotkeys
         self.vars["hotkey_monitor"] = tk.StringVar(value=self.prefs.get_preference("hotkey_monitor") or "")
         self.vars["hotkey_mute"] = tk.StringVar(value=self.prefs.get_preference("hotkey_mute") or "")
+        self.vars["hotkey_calculator"] = tk.StringVar(value=self.prefs.get_preference("hotkey_calculator") or "")
         # RGB
         self.vars["rgb_enabled"] = tk.BooleanVar(value=bool(self.prefs.get_preference("rgb_enabled")))
         # Advanced
@@ -367,6 +368,11 @@ class SettingsGUI:
         self._header(p_hot, "⌨️ Keyboard Shortcuts")
         self._hotkey_row(p_hot, "Show System Stats Key", self.vars["hotkey_monitor"])
         self._hotkey_row(p_hot, "Mute Microphone Key", self.vars["hotkey_mute"])
+        tk.Frame(p_hot, bg=Colors.CONTENT, height=10).pack()
+        self._header(p_hot, "🖩 Calculator")
+        self._hotkey_row(p_hot, "Toggle Calculator (hold Ctrl +)", self.vars["hotkey_calculator"])
+        tk.Label(p_hot, text="   Default: Ctrl + Insert. Press Esc inside to exit.",
+                 font=FONT_SMALL, fg=Colors.TEXT_DIM, bg=Colors.CONTENT).pack(anchor="w", pady=(0, 5))
         self.pages["Hotkeys"] = p_hot
         
         # -- LIGHTING PAGE --
