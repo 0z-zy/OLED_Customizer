@@ -21,8 +21,8 @@ build/
 config.json
 credentials.json
 yt_nowplaying.json
-cert.pem
-key.pem
+*.pem
+*.crx
 .lock
 debug_fs.txt
 build.ps1
