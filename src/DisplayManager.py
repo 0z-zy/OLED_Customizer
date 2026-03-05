@@ -74,79 +74,16 @@ class DisplayManager:
         self.extension_receiver = ExtensionReceiver(port=8888)
         self.extension_receiver.start()
 
-        # Setup keyboard listener for INS key and Global Hotkeys
-        if keyboard:
-            self._listener = None
-            self._hotkey_listener = None
-
-        if keyboard:
-            self._listener = None
-            self.key_monitor_val = None
-            self.key_mute_val = None
-            self.key_calculator_val = None
-            # Track whether Ctrl is currently held for combo hotkeys (Ctrl+Insert)
-            self._ctrl_held = False
-
-            def on_press(key):
-                try:
-                    # Track Ctrl modifier
-                    if key in (keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
-                        self._ctrl_held = True
-
-                    # --- Calculator toggle: Ctrl + calculator key ---
-                    if self._ctrl_held and key == self.key_calculator_val:
-                        self._ctrl_held = False  # Consume the modifier to prevent stickiness
-                        self._calculator_active = not self._calculator_active
-                        if self._calculator_active:
-                            self.calculator.clear()  # Fresh start every time
-                            logger.info("Calculator activated")
-                        else:
-                            logger.info("Calculator deactivated")
-                        return
-
-                    # --- Calculator control keys (non-numpad) ---
-                    # Numpad digits/operators are caught by the raw Windows hook below.
-                    # Here we only handle Esc, Enter, Backspace, Delete.
-                    if self._calculator_active:
-                        if key == keyboard.Key.esc:
-                            self._calculator_active = False
-                            logger.info("Calculator exited via Escape")
-                            return
-                        if key == keyboard.Key.enter:
-                            self.calculator.key_input("enter")
-                            return
-                        if key == keyboard.Key.backspace:
-                            self.calculator.key_input("backspace")
-                            return
-                        if key == keyboard.Key.delete:
-                            self.calculator.key_input("delete")
-                            return
-
-                    # --- Normal hotkeys (always active) ---
-                    if key == self.key_monitor_val:
-                        self.hardware_monitor.trigger()
-                    elif key == self.key_mute_val:
-                        logger.info("Mute key pressed - Toggling Mute")
-                        self.volume_overlay.toggle_mic_mute()
-                except Exception as e:
-                    logger.error(f"Hotkey error: {e}")
-
-            def on_release(key):
-                try:
-                    if key in (keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
-                        self._ctrl_held = False
-                except Exception:
-                    pass
-
-            self._listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-            self._listener.daemon = True
-            self._listener.start()
-            logger.info("Keyboard listener started")
-
-            # Start the raw Windows hook for numpad suppression
-            Thread(target=self._numpad_hook_loop, daemon=True, name="Numpad-Hook").start()
-        else:
-            logger.warning("pynput not available, keyboard features disabled")
+        # Setup global keyboard hook (raw Windows WH_KEYBOARD_LL)
+        # This works even when fullscreen games (GTA V, etc.) have focus,
+        # unlike pynput's Listener which can silently stop receiving events.
+        self._ctrl_held = False
+        # VK codes for hotkeys (populated by _reload_hotkey_vks via load_preferences)
+        self._vk_monitor = None
+        self._vk_mute = None
+        self._vk_calculator = None
+        # Start the raw Windows keyboard hook thread
+        Thread(target=self._keyboard_hook_loop, daemon=True, name="Keyboard-Hook").start()
 
         # Windows Media (SMTC) - runs in background thread
         self.windows_media = WindowsMedia()
@@ -200,13 +137,70 @@ class DisplayManager:
         self.load_preferences()
 
     # ------------------------------------------------------------------
-    # Raw Windows hook for numpad key suppression
+    # Raw low-level Windows keyboard hook (WH_KEYBOARD_LL)
+    # Handles ALL hotkeys + numpad suppression for calculator.
+    # Works even when fullscreen games have exclusive focus.
     # ------------------------------------------------------------------
 
-    def _numpad_hook_loop(self):
+    # Map from pynput-style key strings ("Key.insert") to Windows VK codes
+    _KEY_STR_TO_VK_MAP = {
+        "insert": 0x2D, "delete": 0x2E, "home": 0x24, "end": 0x23,
+        "page_up": 0x21, "page_down": 0x22,
+        "pause": 0x13, "scroll_lock": 0x91, "print_screen": 0x2C,
+        "caps_lock": 0x14, "num_lock": 0x90,
+        "f1": 0x70, "f2": 0x71, "f3": 0x72, "f4": 0x73,
+        "f5": 0x74, "f6": 0x75, "f7": 0x76, "f8": 0x77,
+        "f9": 0x78, "f10": 0x79, "f11": 0x7A, "f12": 0x7B,
+        "space": 0x20, "enter": 0x0D, "backspace": 0x08,
+        "tab": 0x09, "esc": 0x1B,
+        "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27,
+        "media_play_pause": 0xB3, "media_next": 0xB0, "media_previous": 0xB1,
+        "media_volume_mute": 0xAD, "media_volume_up": 0xAF, "media_volume_down": 0xAE,
+    }
+
+    @staticmethod
+    def _key_str_to_vk(key_str):
+        """Convert a preference key string like 'Key.insert' or 'a' to a Windows VK code."""
+        if not key_str:
+            return None
+        try:
+            # "Key.insert" → look up in our map
+            if key_str.startswith("Key."):
+                name = key_str.split("Key.", 1)[1].lower()
+                return DisplayManager._KEY_STR_TO_VK_MAP.get(name)
+
+            # "<65>" → direct VK code
+            if key_str.startswith("<") and key_str.endswith(">"):
+                return int(key_str[1:-1])
+
+            # Single character "a", "1" → use VkKeyScanW to get VK code
+            if len(key_str) == 1:
+                import ctypes
+                result = ctypes.windll.user32.VkKeyScanW(ord(key_str))
+                vk = result & 0xFF
+                if vk != 0xFF:
+                    return vk
+
+            return None
+        except Exception:
+            return None
+
+    def _reload_hotkey_vks(self):
+        """Re-read hotkey preferences and convert to VK codes for the raw hook."""
+        self._vk_monitor = self._key_str_to_vk(self.user_preferences.get_preference("hotkey_monitor"))
+        self._vk_mute = self._key_str_to_vk(self.user_preferences.get_preference("hotkey_mute"))
+        self._vk_calculator = self._key_str_to_vk(self.user_preferences.get_preference("hotkey_calculator"))
+        logger.info(f"Hotkey VKs: Monitor=0x{self._vk_monitor or 0:02X}, "
+                    f"Mute=0x{self._vk_mute or 0:02X}, "
+                    f"Calculator=0x{self._vk_calculator or 0:02X}")
+
+    def _keyboard_hook_loop(self):
         """
         Installs a low-level Windows keyboard hook (WH_KEYBOARD_LL) via ctypes
-        to intercept and suppress numpad keys when calculator mode is active.
+        to handle ALL hotkeys and numpad suppression for calculator.
+
+        This works even when fullscreen games (GTA V, etc.) have exclusive focus,
+        unlike pynput's Listener which can silently lose events.
 
         CRITICAL: Uses proper 64-bit types. On x64 Windows, LRESULT/LPARAM/WPARAM
         are all 8 bytes. Using 4-byte c_long would corrupt the stack.
@@ -224,6 +218,15 @@ class DisplayManager:
             HC_ACTION = 0
             WM_KEYDOWN = 0x0100
             WM_SYSKEYDOWN = 0x0104
+            WM_KEYUP = 0x0101
+            WM_SYSKEYUP = 0x0105
+
+            VK_LCONTROL = 0xA2
+            VK_RCONTROL = 0xA3
+            VK_ESCAPE = 0x1B
+            VK_RETURN = 0x0D
+            VK_BACK = 0x08     # Backspace
+            VK_DELETE = 0x2E
 
             # Numpad VK codes (96..111) + VK_OEM_COMMA (188) + VK_OEM_PERIOD (190)
             NUMPAD_VKS = set(range(96, 112))
@@ -280,31 +283,85 @@ class DisplayManager:
             user32.TranslateMessage.argtypes = [POINTER(wintypes.MSG)]
             user32.DispatchMessageW.argtypes = [POINTER(wintypes.MSG)]
 
-            # ---- The hook callback ----
+            # ---- The unified hook callback ----
             @HOOKPROC
             def _hook_callback(nCode, wParam, lParam):
                 try:
-                    if nCode == HC_ACTION and self._calculator_active:
-                        # Read VK code and flags directly from memory at lParam address
-                        # KBDLLHOOKSTRUCT layout: vkCode(4) scanCode(4) flags(4) ...
+                    if nCode == HC_ACTION:
+                        # Read VK code and flags from memory at lParam address
                         addr = lParam & 0xFFFFFFFFFFFFFFFF  # ensure unsigned
                         vk = ctypes.c_uint32.from_address(addr).value
                         flags = ctypes.c_uint32.from_address(addr + 8).value
 
-                        is_numpad = vk in NUMPAD_VKS
-                        is_numpad_enter = (vk == 13 and (flags & 0x01))
+                        is_down = wParam in (WM_KEYDOWN, WM_SYSKEYDOWN)
+                        is_up = wParam in (WM_KEYUP, WM_SYSKEYUP)
 
-                        if is_numpad or is_numpad_enter:
-                            # Feed calculator on key-DOWN only
-                            if wParam in (WM_KEYDOWN, WM_SYSKEYDOWN):
-                                if 96 <= vk <= 105:
-                                    self.calculator.key_input(str(vk - 96))
-                                elif vk in NUMPAD_OP_MAP:
-                                    self.calculator.key_input(NUMPAD_OP_MAP[vk])
-                                elif is_numpad_enter:
+                        # ---- Track Ctrl modifier ----
+                        if vk in (VK_LCONTROL, VK_RCONTROL):
+                            if is_down:
+                                self._ctrl_held = True
+                            elif is_up:
+                                self._ctrl_held = False
+                            # Don't suppress Ctrl itself
+                            return user32.CallNextHookEx(None, nCode, wParam, lParam)
+
+                        # Only process key-DOWN events for actions below
+                        if is_down:
+                            # ---- Calculator toggle: Ctrl + calculator key ----
+                            if self._ctrl_held and self._vk_calculator and vk == self._vk_calculator:
+                                self._ctrl_held = False  # Consume modifier
+                                self._calculator_active = not self._calculator_active
+                                if self._calculator_active:
+                                    self.calculator.clear()
+                                    logger.info("Calculator activated")
+                                else:
+                                    logger.info("Calculator deactivated")
+                                # Don't suppress — let other apps see the key too
+                                return user32.CallNextHookEx(None, nCode, wParam, lParam)
+
+                            # ---- Calculator control keys ----
+                            if self._calculator_active:
+                                if vk == VK_ESCAPE:
+                                    self._calculator_active = False
+                                    logger.info("Calculator exited via Escape")
+                                    return user32.CallNextHookEx(None, nCode, wParam, lParam)
+                                if vk == VK_RETURN and not (flags & 0x01):
+                                    # Regular Enter (not numpad enter, which is handled below)
                                     self.calculator.key_input("enter")
+                                    return user32.CallNextHookEx(None, nCode, wParam, lParam)
+                                if vk == VK_BACK:
+                                    self.calculator.key_input("backspace")
+                                    return user32.CallNextHookEx(None, nCode, wParam, lParam)
+                                if vk == VK_DELETE:
+                                    self.calculator.key_input("delete")
+                                    return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
-                            return LRESULT(1).value  # SUPPRESS
+                            # ---- Normal hotkeys (always active) ----
+                            if self._vk_monitor and vk == self._vk_monitor:
+                                self.hardware_monitor.trigger()
+                                # Don't suppress
+                                return user32.CallNextHookEx(None, nCode, wParam, lParam)
+
+                            if self._vk_mute and vk == self._vk_mute:
+                                logger.info("Mute key pressed - Toggling Mute")
+                                self.volume_overlay.toggle_mic_mute()
+                                return user32.CallNextHookEx(None, nCode, wParam, lParam)
+
+                        # ---- Numpad suppression (calculator active) ----
+                        if self._calculator_active:
+                            is_numpad = vk in NUMPAD_VKS
+                            is_numpad_enter = (vk == 0x0D and (flags & 0x01))
+
+                            if is_numpad or is_numpad_enter:
+                                if is_down:
+                                    if 96 <= vk <= 105:
+                                        self.calculator.key_input(str(vk - 96))
+                                    elif vk in NUMPAD_OP_MAP:
+                                        self.calculator.key_input(NUMPAD_OP_MAP[vk])
+                                    elif is_numpad_enter:
+                                        self.calculator.key_input("enter")
+                                return LRESULT(1).value  # SUPPRESS numpad keys
+
                 except Exception:
                     pass  # Never let an exception escape the hook callback
 
@@ -312,7 +369,7 @@ class DisplayManager:
 
             # ---- Install ----
             # Must keep callback reference alive (prevent GC)
-            self._numpad_hook_proc = _hook_callback
+            self._keyboard_hook_proc = _hook_callback
 
             hmod = kernel32.GetModuleHandleW(None)
             hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, _hook_callback, hmod, 0)
@@ -322,7 +379,7 @@ class DisplayManager:
                 logger.error(f"SetWindowsHookExW failed (error {err})")
                 return
 
-            logger.info("Numpad suppression hook installed OK")
+            logger.info("Global keyboard hook installed OK (hotkeys + numpad suppression)")
 
             # ---- Message pump (required to keep LL hook alive) ----
             msg = wintypes.MSG()
@@ -331,11 +388,11 @@ class DisplayManager:
                 user32.DispatchMessageW(byref(msg))
 
             user32.UnhookWindowsHookEx(hook)
-            logger.info("Numpad hook removed")
+            logger.info("Keyboard hook removed")
 
         except Exception as e:
             # This thread is non-critical — never crash the app
-            logger.error(f"Numpad hook thread failed: {e}", exc_info=True)
+            logger.error(f"Keyboard hook thread failed: {e}", exc_info=True)
 
     # ------------------------------------------------------------------
 
@@ -375,11 +432,8 @@ class DisplayManager:
         if hasattr(self, "hardware_monitor"):
             self.hardware_monitor.update_preferences(self.user_preferences)
 
-        # Hotkeys
-        self.key_monitor_val = self._parse_key(self.user_preferences.get_preference("hotkey_monitor"))
-        self.key_mute_val = self._parse_key(self.user_preferences.get_preference("hotkey_mute"))
-        self.key_calculator_val = self._parse_key(self.user_preferences.get_preference("hotkey_calculator"))
-        logger.info(f"Hotkeys bound: Monitor={self.key_monitor_val}, Mute={self.key_mute_val}, Calculator={self.key_calculator_val}")
+        # Hotkeys — convert preference strings to VK codes for the raw hook
+        self._reload_hotkey_vks()
         
         self.auto_launch_gg = self.user_preferences.get_preference("auto_launch_gg")
 
@@ -397,29 +451,7 @@ class DisplayManager:
             # The user must fix the config in the settings window to trigger the 'changed' path.
             # OR we could silently try to fetch if prompt_user=False? No, let's keep it clean.
 
-    def _parse_key(self, key_str):
-        if not key_str or not keyboard:
-            return None
-        
-        try:
-            # Handle "Key.insert", "Key.f1" etc.
-            if key_str.startswith("Key."):
-                attr = key_str.split("Key.")[1]
-                return getattr(keyboard.Key, attr, None)
-            
-            # Handle single chars "a", "1"
-            if len(key_str) == 1:
-                return keyboard.KeyCode.from_char(key_str)
-                
-            # Handle codes "<65>"
-            if key_str.startswith("<") and key_str.endswith(">"):
-                code = int(key_str[1:-1])
-                return keyboard.KeyCode.from_vk(code)
-                
-            # Default fallbacks or direct char
-            return keyboard.KeyCode.from_char(key_str)
-        except Exception:
-            return None
+    # _parse_key removed — replaced by _key_str_to_vk and _reload_hotkey_vks above
 
     def init(self):
         # Startup: Only attempt Spotify auth if enabled
