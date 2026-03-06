@@ -1,13 +1,20 @@
 from PIL import Image
 import os
 
+# Resolve project root dynamically (tools/icons/ -> project root)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
+
+# Source icons — place your raw PNGs in tools/icons/raw/ before running
+RAW_DIR = os.path.join(SCRIPT_DIR, "raw")
+
 icons = {
-    "cpu_icon.png": "C:/Users/super/.gemini/antigravity/brain/ccd7851e-5478-4625-a915-bf6f4324f406/cpu_icon_1766345694860.png",
-    "gpu_icon.png": "C:/Users/super/.gemini/antigravity/brain/ccd7851e-5478-4625-a915-bf6f4324f406/gpu_icon_1766345708452.png",
-    "ram_icon.png": "C:/Users/super/.gemini/antigravity/brain/ccd7851e-5478-4625-a915-bf6f4324f406/ram_icon_1766345721484.png"
+    "cpu_icon.png": os.path.join(RAW_DIR, "cpu_icon.png"),
+    "gpu_icon.png": os.path.join(RAW_DIR, "gpu_icon.png"),
+    "ram_icon.png": os.path.join(RAW_DIR, "ram_icon.png"),
 }
 
-dest_dir = "content/assets/"
+dest_dir = os.path.join(PROJECT_ROOT, "content", "assets", "icons")
 
 for name, path in icons.items():
     if os.path.exists(path):
@@ -16,7 +23,7 @@ for name, path in icons.items():
         img = img.resize((12, 12), Image.Resampling.NEAREST)
         
         # Convert to 1-bit for OLED
-        # Create white background image first to handle transparency
+        # Create black background image first to handle transparency
         bg = Image.new("RGB", img.size, (0, 0, 0))
         bg.paste(img, mask=img.split()[3]) # 3 is alpha channel
         bg = bg.convert("1")
@@ -26,3 +33,4 @@ for name, path in icons.items():
         print(f"Saved {save_path}")
     else:
         print(f"Source not found: {path}")
+        print(f"  Place your raw icon PNGs in: {RAW_DIR}")

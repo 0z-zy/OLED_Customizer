@@ -7,8 +7,12 @@ from PIL import Image, ImageDraw, ImageFont
 import time
 import psutil # Needed for HwMon mock? No, we override it.
 
-# Add project root to path
-sys.path.append(r"c:\Users\super\Desktop\Code Stuff\OLED Customizer")
+# Add project root to path dynamically
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
+sys.path.append(PROJECT_ROOT)
+
+CONTENT_DIR = os.path.join(PROJECT_ROOT, "content")
 
 from src.Config import Config
 from src.SpotifyPlayer import SpotifyPlayer
@@ -32,7 +36,7 @@ class MockHardwareMonitor(HardwareMonitor):
         # Skip init thread in base class
         self.config = config
         self.FONT = ImageFont.truetype(
-            font=r"c:\Users\super\Desktop\Code Stuff\OLED Customizer\content\fonts\VerdanaBold.ttf",
+            font=os.path.join(CONTENT_DIR, "fonts", "VerdanaBold.ttf"),
             size=11,
         )
         self.cpu_icon = self._load_icon("cpu_icon.png")
@@ -40,7 +44,7 @@ class MockHardwareMonitor(HardwareMonitor):
         self.ram_icon = self._load_icon("ram_icon.png")
 
     def _load_icon(self, filename):
-        path = fr"c:\Users\super\Desktop\Code Stuff\OLED Customizer\content\assets\icons\{filename}"
+        path = os.path.join(CONTENT_DIR, "assets", "icons", filename)
         if os.path.exists(path):
             return Image.open(path).convert("1")
         return None
@@ -140,7 +144,7 @@ def generate_demos():
         if vol > 33: icon_name = "speaker_mid.png"
         if vol > 66: icon_name = "speaker_high.png"
 
-        icon_path = fr"c:\Users\super\Desktop\Code Stuff\OLED Customizer\content\assets\{icon_name}"
+        icon_path = os.path.join(CONTENT_DIR, "assets", icon_name)
         if os.path.exists(icon_path):
              icon = Image.open(icon_path).convert("1")
              img.paste(icon, (2, 14))

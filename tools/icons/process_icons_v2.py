@@ -1,14 +1,21 @@
 from PIL import Image
 import os
 
+# Resolve project root dynamically (tools/icons/ -> project root)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
+
+# Source icons — place your raw PNGs in tools/icons/raw/ before running
+RAW_DIR = os.path.join(SCRIPT_DIR, "raw")
+
 icons = {
-    "speaker_high_v2.png": "C:/Users/super/.gemini/antigravity/brain/ccd7851e-5478-4625-a915-bf6f4324f406/speaker_vol_high_1766346598423.png",
-    "speaker_mid_v2.png": "C:/Users/super/.gemini/antigravity/brain/ccd7851e-5478-4625-a915-bf6f4324f406/speaker_vol_mid_1766346610736.png",
-    "speaker_low_v2.png": "C:/Users/super/.gemini/antigravity/brain/ccd7851e-5478-4625-a915-bf6f4324f406/speaker_vol_low_1766346623800.png",
-    "speaker_mute_v2.png": "C:/Users/super/.gemini/antigravity/brain/ccd7851e-5478-4625-a915-bf6f4324f406/speaker_vol_mute_1766346634771.png"
+    "speaker_high_v2.png": os.path.join(RAW_DIR, "speaker_vol_high.png"),
+    "speaker_mid_v2.png": os.path.join(RAW_DIR, "speaker_vol_mid.png"),
+    "speaker_low_v2.png": os.path.join(RAW_DIR, "speaker_vol_low.png"),
+    "speaker_mute_v2.png": os.path.join(RAW_DIR, "speaker_vol_mute.png"),
 }
 
-dest_dir = "content/assets/"
+dest_dir = os.path.join(PROJECT_ROOT, "content", "assets")
 
 for name, path in icons.items():
     if os.path.exists(path):
@@ -27,3 +34,4 @@ for name, path in icons.items():
         print(f"Saved {save_path}")
     else:
         print(f"Source not found: {path}")
+        print(f"  Place your raw icon PNGs in: {RAW_DIR}")
