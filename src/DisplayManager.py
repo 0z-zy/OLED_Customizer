@@ -78,6 +78,7 @@ class DisplayManager:
         # This works even when fullscreen games (GTA V, etc.) have focus,
         # unlike pynput's Listener which can silently stop receiving events.
         self._ctrl_held = False
+        self._shift_held = False  # Track Shift for parenthesis detection
         # VK codes for hotkeys (populated by _reload_hotkey_vks via load_preferences)
         self._vk_monitor = None
         self._vk_mute = None
@@ -260,6 +261,8 @@ class DisplayManager:
 
             VK_LCONTROL = 0xA2
             VK_RCONTROL = 0xA3
+            VK_LSHIFT   = 0xA0
+            VK_RSHIFT   = 0xA1
             VK_ESCAPE = 0x1B
             VK_RETURN = 0x0D
             VK_BACK = 0x08     # Backspace
@@ -320,6 +323,38 @@ class DisplayManager:
             user32.TranslateMessage.argtypes = [POINTER(wintypes.MSG)]
             user32.DispatchMessageW.argtypes = [POINTER(wintypes.MSG)]
 
+            # ToUnicode: translates VK + scan code + keyboard state → character
+            # Used to detect ( and ) regardless of keyboard layout (TR, EN, etc.)
+            user32.ToUnicode.restype  = ctypes.c_int
+            user32.ToUnicode.argtypes = [
+                wintypes.UINT,           # wVirtKey
+                wintypes.UINT,           # wScanCode
+                ctypes.POINTER(ctypes.c_ubyte),  # lpKeyState (256 bytes)
+                ctypes.c_void_p,         # pwszBuff (writable wide-char buffer)
+                ctypes.c_int,            # cchBuff
+                wintypes.UINT,           # wFlags
+            ]
+
+            def _vk_to_char(vk, scan):
+                """Translate a VK code to its character using current keyboard state.
+                Returns the character string, or '' on failure."""
+                try:
+                    key_state = (ctypes.c_ubyte * 256)()
+                    # Inject Shift state so ToUnicode resolves the shifted character.
+                    # VK_SHIFT (0x10) is the generic one ToUnicode actually checks.
+                    # Also set VK_LSHIFT (0xA0) / VK_RSHIFT (0xA1) for completeness.
+                    if self._shift_held:
+                        key_state[0x10] = 0x80   # VK_SHIFT  (generic — what ToUnicode uses)
+                        key_state[0xA0] = 0x80   # VK_LSHIFT
+                        key_state[0xA1] = 0x80   # VK_RSHIFT
+                    buf = ctypes.create_unicode_buffer(4)
+                    n = user32.ToUnicode(vk, scan, key_state, buf, 4, 0)
+                    if n > 0:
+                        return buf.value[:n]
+                except Exception:
+                    pass
+                return ""
+
             # ---- Enqueue helper (fire-and-forget, never blocks) ----
             def _enqueue(action):
                 try:
@@ -352,6 +387,15 @@ class DisplayManager:
                             # Don't suppress Ctrl itself
                             return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
+                        # ---- Track Shift modifier (for parenthesis detection) ----
+                        if vk in (VK_LSHIFT, VK_RSHIFT):
+                            if is_down:
+                                self._shift_held = True
+                            elif is_up:
+                                self._shift_held = False
+                            # Don't suppress Shift itself
+                            return user32.CallNextHookEx(None, nCode, wParam, lParam)
+
                         # Only process key-DOWN events for actions below
                         if is_down:
                             # ---- Calculator toggle: Ctrl + calculator key ----
@@ -380,6 +424,15 @@ class DisplayManager:
                                 if vk == VK_DELETE:
                                     _enqueue("calc_input:delete")
                                     return user32.CallNextHookEx(None, nCode, wParam, lParam)
+
+                                # ---- Parentheses — layout-agnostic via ToUnicode ----
+                                # Works on TR keyboard (Shift+8 = '(', Shift+9 = ')')
+                                # and EN keyboard (Shift+9 = '(', Shift+0 = ')') etc.
+                                scan = ctypes.c_uint32.from_address(addr + 4).value
+                                ch = _vk_to_char(vk, scan)
+                                if ch in ("(", ")"):
+                                    _enqueue(f"calc_input:{ch}")
+                                    return LRESULT(1).value  # suppress so game doesn't see it
 
                             # ---- Normal hotkeys (always active) ----
                             if self._vk_monitor and vk == self._vk_monitor:
