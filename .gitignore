@@ -26,3 +26,4 @@ yt_nowplaying.json
 .lock
 debug_fs.txt
 build.ps1
+tools/
