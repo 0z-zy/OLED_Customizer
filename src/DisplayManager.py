@@ -82,6 +82,11 @@ class DisplayManager:
         self._vk_monitor = None
         self._vk_mute = None
         self._vk_calculator = None
+        # Action queue: hook callback enqueues lightweight strings,
+        # worker thread handles them. This keeps the hook callback <1ms
+        # so Windows never kills it (LL hooks die after ~300ms timeout).
+        self._hotkey_action_queue = Queue(maxsize=32)
+        Thread(target=self._hotkey_action_worker, daemon=True, name="Hotkey-Actions").start()
         # Start the raw Windows keyboard hook thread
         Thread(target=self._keyboard_hook_loop, daemon=True, name="Keyboard-Hook").start()
 
@@ -194,6 +199,38 @@ class DisplayManager:
                     f"Mute=0x{self._vk_mute or 0:02X}, "
                     f"Calculator=0x{self._vk_calculator or 0:02X}")
 
+    def _hotkey_action_worker(self):
+        """
+        Worker thread that processes hotkey actions dispatched from the
+        keyboard hook callback. This keeps the hook callback <1ms so
+        Windows never kills it (LL hooks die after ~300ms timeout).
+
+        Actions like toggle_mic_mute use COM calls that can take 100ms+,
+        which would cause the hook to be silently removed by Windows.
+        """
+        while True:
+            try:
+                action = self._hotkey_action_queue.get(timeout=2.0)
+                if action == "trigger_monitor":
+                    self.hardware_monitor.trigger()
+                elif action == "toggle_mute":
+                    logger.info("Mute key pressed - Toggling Mute")
+                    self.volume_overlay.toggle_mic_mute()
+                elif action == "calc_on":
+                    self.calculator.clear()
+                    logger.info("Calculator activated")
+                elif action == "calc_off":
+                    logger.info("Calculator deactivated")
+                elif action == "calc_exit":
+                    logger.info("Calculator exited via Escape")
+                elif action and action.startswith("calc_input:"):
+                    key = action.split(":", 1)[1]
+                    self.calculator.key_input(key)
+            except Empty:
+                continue
+            except Exception:
+                pass
+
     def _keyboard_hook_loop(self):
         """
         Installs a low-level Windows keyboard hook (WH_KEYBOARD_LL) via ctypes
@@ -283,7 +320,17 @@ class DisplayManager:
             user32.TranslateMessage.argtypes = [POINTER(wintypes.MSG)]
             user32.DispatchMessageW.argtypes = [POINTER(wintypes.MSG)]
 
+            # ---- Enqueue helper (fire-and-forget, never blocks) ----
+            def _enqueue(action):
+                try:
+                    self._hotkey_action_queue.put_nowait(action)
+                except Exception:
+                    pass  # Queue full — drop (better than blocking the hook)
+
             # ---- The unified hook callback ----
+            # CRITICAL: This must return in <1ms. Windows silently kills
+            # LL hooks whose callbacks exceed ~300ms. ALL real work is
+            # dispatched to _hotkey_action_worker via the queue.
             @HOOKPROC
             def _hook_callback(nCode, wParam, lParam):
                 try:
@@ -312,10 +359,9 @@ class DisplayManager:
                                 self._ctrl_held = False  # Consume modifier
                                 self._calculator_active = not self._calculator_active
                                 if self._calculator_active:
-                                    self.calculator.clear()
-                                    logger.info("Calculator activated")
+                                    _enqueue("calc_on")
                                 else:
-                                    logger.info("Calculator deactivated")
+                                    _enqueue("calc_off")
                                 # Don't suppress — let other apps see the key too
                                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
@@ -323,28 +369,25 @@ class DisplayManager:
                             if self._calculator_active:
                                 if vk == VK_ESCAPE:
                                     self._calculator_active = False
-                                    logger.info("Calculator exited via Escape")
+                                    _enqueue("calc_exit")
                                     return user32.CallNextHookEx(None, nCode, wParam, lParam)
                                 if vk == VK_RETURN and not (flags & 0x01):
-                                    # Regular Enter (not numpad enter, which is handled below)
-                                    self.calculator.key_input("enter")
+                                    _enqueue("calc_input:enter")
                                     return user32.CallNextHookEx(None, nCode, wParam, lParam)
                                 if vk == VK_BACK:
-                                    self.calculator.key_input("backspace")
+                                    _enqueue("calc_input:backspace")
                                     return user32.CallNextHookEx(None, nCode, wParam, lParam)
                                 if vk == VK_DELETE:
-                                    self.calculator.key_input("delete")
+                                    _enqueue("calc_input:delete")
                                     return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
                             # ---- Normal hotkeys (always active) ----
                             if self._vk_monitor and vk == self._vk_monitor:
-                                self.hardware_monitor.trigger()
-                                # Don't suppress
+                                _enqueue("trigger_monitor")
                                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
                             if self._vk_mute and vk == self._vk_mute:
-                                logger.info("Mute key pressed - Toggling Mute")
-                                self.volume_overlay.toggle_mic_mute()
+                                _enqueue("toggle_mute")
                                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
                         # ---- Numpad suppression (calculator active) ----
@@ -355,11 +398,11 @@ class DisplayManager:
                             if is_numpad or is_numpad_enter:
                                 if is_down:
                                     if 96 <= vk <= 105:
-                                        self.calculator.key_input(str(vk - 96))
+                                        _enqueue(f"calc_input:{vk - 96}")
                                     elif vk in NUMPAD_OP_MAP:
-                                        self.calculator.key_input(NUMPAD_OP_MAP[vk])
+                                        _enqueue(f"calc_input:{NUMPAD_OP_MAP[vk]}")
                                     elif is_numpad_enter:
-                                        self.calculator.key_input("enter")
+                                        _enqueue("calc_input:enter")
                                 return LRESULT(1).value  # SUPPRESS numpad keys
 
                 except Exception:
