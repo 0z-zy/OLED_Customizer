@@ -1,6 +1,6 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlencode, urlparse, parse_qs
-from requests import Session
+import urllib3
 from base64 import b64encode
 from time import time
 from json import loads, dumps
@@ -14,7 +14,6 @@ import os
 import socket
 
 from src.utils import fetch_app_data_path
-from src.ssl import generate_cert
 
 logger = logging.getLogger('SpotifyAPI')
 
@@ -35,7 +34,12 @@ class SpotifyAPI:
         self.token = ""
         self.expires = -1
         
-        self.session = Session()
+        # urllib3 PoolManager for lean HTTP calls
+        self._http = urllib3.PoolManager(
+            headers={"Connection": "keep-alive"},
+            timeout=urllib3.Timeout(connect=1.0, read=5.0),
+            retries=urllib3.Retry(total=3, backoff_factor=1)
+        )
         self._auth_lock = __import__('threading').Lock()
 
     def _check_configuration(self):
@@ -114,7 +118,6 @@ class SpotifyAPI:
                     self.retrieve_token(server.code)
                 elif server.error:
                     logger.error(f"Auth server error: {server.error}")
-                    # raise Exception(server.error) # Don't crash, just log due to thread
         finally:
             self._auth_lock.release()
 
@@ -162,24 +165,27 @@ class SpotifyAPI:
         """Exchange authorization code for access token."""
         try:
             auth_header = b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
-            response = self.session.post(
+            body = urlencode({
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": self.redirect_uri
+            })
+            
+            response = self._http.request(
+                "POST",
                 self.SPOTIFY_API_URL + "/api/token",
                 headers={
                     "Authorization": f"Basic {auth_header}",
                     "Content-Type": "application/x-www-form-urlencoded"
                 },
-                data={
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "redirect_uri": self.redirect_uri
-                }
+                body=body
             )
             
-            if response.status_code != 200:
-                logger.error(f"Token exchange failed: {response.status_code} - {response.text}")
+            if response.status != 200:
+                logger.error(f"Token exchange failed: {response.status} - {response.data.decode('utf-8')}")
                 return False
             
-            data = response.json()
+            data = loads(response.data.decode('utf-8'))
             self.token = data.get("access_token", "")
             self.refresh_token = data.get("refresh_token", "")
             self.expires = time() + data.get("expires_in", 3600) - 60  # Refresh 1 min early
@@ -195,25 +201,27 @@ class SpotifyAPI:
         """Refresh the access token using the refresh token."""
         try:
             auth_header = b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
-            response = self.session.post(
+            body = urlencode({
+                "grant_type": "refresh_token",
+                "refresh_token": self.refresh_token
+            })
+            
+            response = self._http.request(
+                "POST",
                 self.SPOTIFY_API_URL + "/api/token",
                 headers={
                     "Authorization": f"Basic {auth_header}",
                     "Content-Type": "application/x-www-form-urlencoded"
                 },
-                data={
-                    "grant_type": "refresh_token",
-                    "refresh_token": self.refresh_token
-                }
+                body=body
             )
             
-            if response.status_code != 200:
-                logger.error(f"Token refresh failed: {response.status_code} - {response.text}")
+            if response.status != 200:
+                logger.error(f"Token refresh failed: {response.status} - {response.data.decode('utf-8')}")
                 return False
             
-            data = response.json()
+            data = loads(response.data.decode('utf-8'))
             self.token = data.get("access_token", "")
-            # Refresh token may or may not change
             if "refresh_token" in data:
                 self.refresh_token = data["refresh_token"]
             self.expires = time() + data.get("expires_in", 3600) - 60
@@ -236,25 +244,25 @@ class SpotifyAPI:
                 return None
         
         try:
-            response = self.session.get(
+            response = self._http.request(
+                "GET",
                 "https://api.spotify.com/v1/me/player/currently-playing",
                 headers={"Authorization": f"Bearer {self.token}"}
             )
             
-            if response.status_code == 204:
-                # No content - nothing playing
+            if response.status == 204:
                 return None
             
-            if response.status_code == 401:
+            if response.status == 401:
                 # Token expired, try refresh
                 if self.refresh_access_token():
                     return self.fetch_song()
                 return None
             
-            if response.status_code != 200:
+            if response.status != 200:
                 return None
             
-            data = response.json()
+            data = loads(response.data.decode('utf-8'))
             
             if not data or not data.get("item"):
                 return None
@@ -327,8 +335,8 @@ class SpotifyAPI:
 
                         if "GET" in first_line and "/callback" in first_line:
                             try:
-                                path = first_line.split(" ")[1]
-                                query = parse_qs(urlparse(path).query)
+                                path_query = first_line.split(" ")[1]
+                                query = parse_qs(urlparse(path_query).query)
                                 if 'code' in query:
                                     self.code = query['code'][0]
                                 elif 'error' in query:

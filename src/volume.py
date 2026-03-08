@@ -97,26 +97,46 @@ class VolumeOverlay:
                 pass
                 
     def toggle_mic_mute(self):
-        """Toggle mic mute state - works with Discord (just shows overlay)"""
-        if self._mic_volume:
-            try:
-                current = bool(self._mic_volume.GetMute())
-                self._mic_volume.SetMute(not current, None)
+        """Toggle mic mute state - re-acquires interface to ensure thread safety (COM)"""
+        # Ensure COM is initialized for this thread (hotkey worker thread)
+        import ctypes
+        try:
+            ctypes.windll.ole32.CoInitialize(None)
+        except:
+            pass
+
+        try:
+            # Re-acquire the microphone interface EVERY time to be thread-safe
+            # and handle device changes/disconnections.
+            from pycaw.pycaw import AudioUtilities as AU
+            devices = AU.GetMicrophone()
+            if devices:
+                interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                mic_volume = cast(interface, POINTER(IAudioEndpointVolume))
+                
+                current = bool(mic_volume.GetMute())
+                new_state = not current
+                mic_volume.SetMute(new_state, None)
+                
+                self._last_mic_mute = new_state
                 if time() - self.app_start_time > 4.0:
                     self._last_change = time()
-                logger.info(f"Toggled System Mic Mute to {not current}")
+                
+                logger.info(f"Toggled System Mic Mute to {new_state}")
                 return
-            except Exception as e:
-                logger.warning(f"System mic control failed: {e}")
-        
-        # Discord mode: just toggle internal state for overlay display
+            else:
+                logger.warning("No microphone found during toggle")
+        except Exception as e:
+            logger.warning(f"System mic control failed: {e}")
+
+        # Fallback/Discord mode: just toggle internal state for overlay display
         if self._last_mic_mute is None:
             self._last_mic_mute = False
         self._last_mic_mute = not self._last_mic_mute
         
         if time() - self.app_start_time > 4.0:
             self._last_change = time()
-        logger.info(f"Discord mode: Mic mute overlay = {self._last_mic_mute}")
+        logger.info(f"Fallback mode: Mic mute overlay = {self._last_mic_mute}")
 
     def _check_discord(self):
         if time() - self._last_discord_check < 2.0:

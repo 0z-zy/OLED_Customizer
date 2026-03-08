@@ -1,9 +1,9 @@
-from json import loads
+from json import loads, dumps
 from time import sleep, time
 import gc
 from os import environ, path
 import logging
-import requests
+import urllib3
 
 GAME = "OLED_CUSTOMIZER_V3"
 GAME_DISPLAY_NAME = "OLED Customizer"
@@ -21,28 +21,27 @@ class SteelSeriesAPI:
             path.join(programdata, "SteelSeries", "SteelSeries GG", "coreProps.json"),
         ]
         self.address = ""
-        # Use persistent Session with connection pooling to reduce object churn
-        # This prevents GC crashes during frequent API calls
-        from urllib3.util.retry import Retry
-        from requests.adapters import HTTPAdapter
         
-        self._session = requests.Session()
-        self._session.headers.update({"Connection": "keep-alive"})
-        
-        # Limit pool size and disable retries to minimize object creation
-        adapter = HTTPAdapter(
-            pool_connections=1,
-            pool_maxsize=1,
-            max_retries=Retry(total=0)
+        # Use urllib3 PoolManager directly for maximum performance and minimal object churn.
+        # requests.Session creates many heavy objects (Headers, CaseInsensitiveDict, etc.)
+        # for every single request, which can lead to GC crashes at 10+ FPS.
+        self._http = urllib3.PoolManager(
+            num_pools=1,
+            headers={"Content-Type": "application/json", "Connection": "keep-alive"},
+            timeout=urllib3.Timeout(connect=0.1, read=0.5),
+            retries=False
         )
-        self._session.mount("http://", adapter)
         
         # Thread lock to prevent concurrent sends
-        self._send_lock = __import__('threading').Lock()
+        import threading
+        self._send_lock = threading.Lock()
         
-        # Error back-off: stop hammering API when it's struggling
+        # Error back-off
         self._consecutive_errors = 0
-        self._backoff_until = 0  # timestamp - don't send until this time
+        self._backoff_until = 0
+        
+        # Frame counter for periodic manual GC collection
+        self._frames_sent = 0
         
         self.retrieve_address()
 
@@ -124,9 +123,9 @@ class SteelSeriesAPI:
             "game": GAME,
             "event": EVENT,
             "data": {
-                "value": 100, # Dummy value to trigger handlers if needed
+                "value": 100, 
                 "frame": {
-                    "rgb-per-key": [r, g, b] * 150 # Large enough array for most keyboards
+                    "rgb-per-key": [r, g, b] * 150 
                 }
             }
         })
@@ -142,57 +141,64 @@ class SteelSeriesAPI:
             "game": GAME,
             "game_display_name": GAME_DISPLAY_NAME,
             "developer": AUTHOR,
-            "deinitialize_timer_length_ms": 900000  # 15 minutes keep-alive (was 60s)
+            "deinitialize_timer_length_ms": 60000 
         })
 
     def heartbeat(self):
-        """Send a lightweight heartbeat to keep the game registered with SteelSeries GG."""
+        """Send a lightweight heartbeat to keep the game registered."""
         try:
             self.send_data("/game_heartbeat", {"game": GAME})
         except Exception:
             pass
 
     def send_data(self, endpoint, data):
-        # Error back-off: if we've had too many errors, wait before retrying
+        # Error back-off check
         if self._consecutive_errors >= 5:
             now = time()
             if now < self._backoff_until:
-                return  # Still in back-off period, skip this send
+                return
             else:
-                # Back-off expired, reset and try again
                 logger.info("Back-off expired, resuming API calls...")
                 self._consecutive_errors = 0
 
-        # Use lock to prevent concurrent sends (reduces object churn/GC crashes)
+        # Minimize object creation: encode JSON once outside the loop
+        body = dumps(data).encode('utf-8')
+        url = self.address + endpoint
+
         with self._send_lock:
-            response = None
             try:
-                response = self._session.post(
-                    self.address + endpoint,
-                    json=data,
-                    timeout=0.5
+                response = self._http.request(
+                    "POST",
+                    url,
+                    body=body,
+                    headers={
+                        "Content-Length": str(len(body)),
+                        "Content-Type": "application/json"
+                    }
                 )
-                if response.status_code != 200:
-                    logger.debug("SteelSeries API error %d: %s", response.status_code, response.text)
+                
+                if response.status != 200:
+                    logger.debug("SteelSeries API error %d: %s", response.status, response.data.decode('utf-8', 'ignore'))
                     self._consecutive_errors += 1
                 else:
-                    # Success - reset error counter
                     self._consecutive_errors = 0
-            except (OSError, RuntimeError) as e:
-                # COM/threading errors that can occur during GC
-                self._consecutive_errors += 1
+                    self._frames_sent += 1
+                
+                # IMPORTANT: In urllib3, you must ensure the response data is read 
+                # (already done by .data) so the connection can be returned to the pool.
+                # BaseHTTPResponse doesn't have a .close() like requests, it happens automatically.
+                
             except Exception as e:
-                # Timeouts/connection errors
                 self._consecutive_errors += 1
-            finally:
-                # IMPORTANT: Always close response to free memory
-                if response is not None:
-                    try:
-                        response.close()
-                    except Exception:
-                        pass
+                # logger.debug("SteelSeries API Transport Error: %s", e)
 
-                # If we hit the error threshold, start back-off
-                if self._consecutive_errors >= 5:
-                    self._backoff_until = time() + 2.0  # Wait 2 seconds
-                    logger.warning("Too many API errors (%d), backing off for 2s", self._consecutive_errors)
+            # Periodic manual GC collection to help high-frequency loops stay clean.
+            # Only do generation 1 collection to avoid blocking the main thread for too long.
+            if self._frames_sent >= 100:
+                self._frames_sent = 0
+                gc.collect(1)
+
+        # If we hit error threshold, start back-off
+        if self._consecutive_errors >= 5:
+            self._backoff_until = time() + 2.0
+            logger.warning("Too many API errors (%d), backing off for 2s", self._consecutive_errors)
