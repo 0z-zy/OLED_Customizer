@@ -141,6 +141,16 @@ class DisplayManager:
         Thread(target=self._spotify_worker_loop, daemon=True, name="Spotify-Worker").start()
         
         self.load_preferences()
+        
+        # Diagnostic: Log Admin status
+        try:
+            import ctypes
+            is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+            logger.info(f"Process Privilege Status: {'ADMIN/UAC' if is_admin else 'USER'}")
+            if not is_admin:
+                logger.warning("App detected NOT running as Admin. Hotkeys may fail over elevated games (GTA V, etc.).")
+        except:
+            pass
 
     # ------------------------------------------------------------------
     # Raw low-level Windows keyboard hook (WH_KEYBOARD_LL)
@@ -440,6 +450,7 @@ class DisplayManager:
                                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
                             if self._vk_mute and vk == self._vk_mute:
+                                logger.debug(f"RAW HOOK: Captured Mute Hotkey (VK:0x{vk:02X})")
                                 _enqueue("toggle_mute")
                                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
