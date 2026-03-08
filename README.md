@@ -2,7 +2,7 @@
 
 **The ultimate music and system dashboard for your SteelSeries Keyboard.**
 
-![Version](https://img.shields.io/badge/version-1.4.1-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-1.4.8-blue?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey?style=for-the-badge)
 
@@ -13,6 +13,7 @@ OLED Customizer transforms your keyboard's small screen into a powerful, high-co
 ## 📋 Table of Contents
 
 - [🚀 Key Highlights](#-key-highlights)
+- [⌨️ Hotkeys](#️-hotkeys)
 - [🎨 Advanced Customization](#-advanced-customization)
 - [🛠️ Quick Setup](#️-quick-setup)
 - [🎵 Spotify API Setup](#-spotify-api-setup)
@@ -38,6 +39,8 @@ OLED Customizer transforms your keyboard's small screen into a powerful, high-co
 - **Instant Peek**: Tap **INS (Insert)** to summon your system stats over any screen.
 - **Thermal Guard**: High-accuracy monitoring for CPU & GPU (Usage & Temps).
 - **Memory Tracking**: See exactly how much RAM you have left at a glance.
+- **🎮 Game FPS**: Live FPS counter when a game is running (requires Admin).
+- **GPU Selection**: Choose which GPU to monitor in settings.
 - **Custom Art**: Unique 12x12 pixel art icons for a premium look.
 
 ![HW Monitor Demo](content/demos/demo_hw_monitor.gif)
@@ -46,9 +49,30 @@ OLED Customizer transforms your keyboard's small screen into a powerful, high-co
 
 - **Adaptive Icons**: Visual feedback changes with your volume level.
 - **Discord Sync**: A microphone icon appears automatically when you're in Discord.
-- **Global Mute**: Press **PAUSE** to mute your system mic and see status update instantly.
+- **Global Mute**: Press your mute hotkey to toggle mic — supports **keyboard keys** and **mouse side buttons** (Mouse 4/5).
+- **Nuclear Mute**: If Windows can't find a default mic, it mutes **all** active capture devices at once.
+- **Dual Hotkeys**: Set a primary and optional secondary mute key in settings.
 
 ![Volume Demo](content/demos/demo_volume.gif)
+
+### 🖩 Calculator
+
+- **Quick Access**: Hold **Ctrl + Insert** to toggle a calculator overlay on your OLED.
+- **Numpad Input**: Type with your numpad — keys are captured so games don't see them.
+- **Parentheses**: Full support for `(` and `)` on any keyboard layout.
+
+---
+
+## ⌨️ Hotkeys
+
+| Action | Default Key | Notes |
+| :--- | :--- | :--- |
+| Show System Stats | `Insert` | Quick peek at CPU/GPU/RAM |
+| Mute Microphone (Primary) | `Pause` | Supports keyboard & mouse buttons |
+| Mute Microphone (Optional) | *Not set* | Bind a second key in settings |
+| Toggle Calculator | `Ctrl + Insert` | Numpad input, `Esc` to close |
+
+All hotkeys work globally — even inside fullscreen games.
 
 ---
 
@@ -78,7 +102,7 @@ Access `%APPDATA%/OLED Customizer/config.json` or use the **Settings GUI** to ad
 
 ### 1. Requirements
 
-- **SteelSeries GG**: Ensure Engine 3 or GG is running.
+- **SteelSeries GG**: Ensure Engine 3 or GG is running (can auto-launch via settings).
 - **Windows 10/11**: Fully optimized for modern Windows environments.
 - **Spotify Account**: Only needed if you want Spotify-specific features.
 
