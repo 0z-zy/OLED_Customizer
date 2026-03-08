@@ -41,7 +41,8 @@ class UserPreferences:
         "hw_polling_interval": 1000,
         "show_game_fps": False,
         "selected_gpu": "Auto",
-        "hotkey_calculator": "Key.insert"
+        "hotkey_calculator": "Key.insert",
+        "hotkey_mute_2": ""
     }
 
     def __init__(self):

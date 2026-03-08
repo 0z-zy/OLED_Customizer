@@ -82,6 +82,7 @@ class DisplayManager:
         # VK codes for hotkeys (populated by _reload_hotkey_vks via load_preferences)
         self._vk_monitor = None
         self._vk_mute = None
+        self._vk_mute_2 = None
         self._vk_calculator = None
         # Action queue: hook callback enqueues lightweight strings,
         # worker thread handles them. This keeps the hook callback <1ms
@@ -172,6 +173,7 @@ class DisplayManager:
         "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27,
         "media_play_pause": 0xB3, "media_next": 0xB0, "media_previous": 0xB1,
         "media_volume_mute": 0xAD, "media_volume_up": 0xAF, "media_volume_down": 0xAE,
+        "mouse_4": 0x05, "mouse_5": 0x06,
     }
 
     @staticmethod
@@ -205,9 +207,10 @@ class DisplayManager:
         """Re-read hotkey preferences and convert to VK codes for the raw hook."""
         self._vk_monitor = self._key_str_to_vk(self.user_preferences.get_preference("hotkey_monitor"))
         self._vk_mute = self._key_str_to_vk(self.user_preferences.get_preference("hotkey_mute"))
+        self._vk_mute_2 = self._key_str_to_vk(self.user_preferences.get_preference("hotkey_mute_2"))
         self._vk_calculator = self._key_str_to_vk(self.user_preferences.get_preference("hotkey_calculator"))
         logger.info(f"Hotkey VKs: Monitor=0x{self._vk_monitor or 0:02X}, "
-                    f"Mute=0x{self._vk_mute or 0:02X}, "
+                    f"Mute=0x{self._vk_mute or 0:02X}, Mute2=0x{self._vk_mute_2 or 0:02X}, "
                     f"Calculator=0x{self._vk_calculator or 0:02X}")
 
     def _hotkey_action_worker(self):
@@ -263,11 +266,15 @@ class DisplayManager:
 
             # ---- Constants ----
             WH_KEYBOARD_LL = 13
+            WH_MOUSE_LL = 14
             HC_ACTION = 0
             WM_KEYDOWN = 0x0100
             WM_SYSKEYDOWN = 0x0104
             WM_KEYUP = 0x0101
             WM_SYSKEYUP = 0x0105
+            
+            WM_XBUTTONDOWN = 0x020B
+            WM_XBUTTONUP = 0x020C
 
             VK_LCONTROL = 0xA2
             VK_RCONTROL = 0xA3
@@ -449,7 +456,7 @@ class DisplayManager:
                                 _enqueue("trigger_monitor")
                                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
-                            if self._vk_mute and vk == self._vk_mute:
+                            if (self._vk_mute and vk == self._vk_mute) or (self._vk_mute_2 and vk == self._vk_mute_2):
                                 logger.debug(f"RAW HOOK: Captured Mute Hotkey (VK:0x{vk:02X})")
                                 _enqueue("toggle_mute")
                                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
@@ -474,19 +481,47 @@ class DisplayManager:
 
                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
+            @HOOKPROC
+            def _mouse_hook_callback(nCode, wParam, lParam):
+                try:
+                    if nCode == HC_ACTION:
+                        if wParam == WM_XBUTTONDOWN:
+                            # Read XBUTTON data from memory at lParam + 8
+                            addr = lParam & 0xFFFFFFFFFFFFFFFF
+                            mouse_data = ctypes.c_uint32.from_address(addr + 8).value
+                            xbutton = (mouse_data >> 16) & 0xFFFF
+                            
+                            vk = None
+                            if xbutton == 1: vk = 0x05 # Mouse 4
+                            elif xbutton == 2: vk = 0x06 # Mouse 5
+                            
+                            if vk:
+                                if self._vk_monitor and vk == self._vk_monitor:
+                                    _enqueue("trigger_monitor")
+                                    return LRESULT(1).value # Suppress so game doesn't see it (common for side buttons)
+                                if (self._vk_mute and vk == self._vk_mute) or (self._vk_mute_2 and vk == self._vk_mute_2):
+                                    _enqueue("toggle_mute")
+                                    return LRESULT(1).value
+
+                except Exception:
+                    pass
+                return user32.CallNextHookEx(None, nCode, wParam, lParam)
+
             # ---- Install ----
-            # Must keep callback reference alive (prevent GC)
+            # Must keep callback references alive (prevent GC)
             self._keyboard_hook_proc = _hook_callback
+            self._mouse_hook_proc = _mouse_hook_callback
 
             hmod = kernel32.GetModuleHandleW(None)
-            hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, _hook_callback, hmod, 0)
+            k_hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, _hook_callback, hmod, 0)
+            m_hook = user32.SetWindowsHookExW(WH_MOUSE_LL, _mouse_hook_callback, hmod, 0)
 
-            if not hook:
+            if not k_hook or not m_hook:
                 err = ctypes.get_last_error()
                 logger.error(f"SetWindowsHookExW failed (error {err})")
                 return
 
-            logger.info("Global keyboard hook installed OK (hotkeys + numpad suppression)")
+            logger.info("Global kb/mouse hooks installed OK")
 
             # ---- Message pump (required to keep LL hook alive) ----
             msg = wintypes.MSG()
@@ -494,8 +529,9 @@ class DisplayManager:
                 user32.TranslateMessage(byref(msg))
                 user32.DispatchMessageW(byref(msg))
 
-            user32.UnhookWindowsHookEx(hook)
-            logger.info("Keyboard hook removed")
+            user32.UnhookWindowsHookEx(k_hook)
+            user32.UnhookWindowsHookEx(m_hook)
+            logger.info("Hooks removed")
 
         except Exception as e:
             # This thread is non-critical — never crash the app

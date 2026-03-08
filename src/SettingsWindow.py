@@ -4,7 +4,7 @@ Frameless window, sidebar navigation, custom widgets, high-end aesthetics.
 """
 
 import tkinter as tk
-from tkinter import ttk, colorchooser
+from tkinter import ttk, colorchooser, messagebox
 import logging
 
 logger = logging.getLogger("OLED Customizer.Settings")
@@ -278,6 +278,7 @@ class SettingsGUI:
         # Hotkeys
         self.vars["hotkey_monitor"] = tk.StringVar(value=self.prefs.get_preference("hotkey_monitor") or "")
         self.vars["hotkey_mute"] = tk.StringVar(value=self.prefs.get_preference("hotkey_mute") or "")
+        self.vars["hotkey_mute_2"] = tk.StringVar(value=self.prefs.get_preference("hotkey_mute_2") or "")
         self.vars["hotkey_calculator"] = tk.StringVar(value=self.prefs.get_preference("hotkey_calculator") or "")
         # RGB
         self.vars["rgb_enabled"] = tk.BooleanVar(value=bool(self.prefs.get_preference("rgb_enabled")))
@@ -367,7 +368,8 @@ class SettingsGUI:
         p_hot = tk.Frame(self.content_area, bg=Colors.CONTENT)
         self._header(p_hot, "⌨️ Keyboard Shortcuts")
         self._hotkey_row(p_hot, "Show System Stats Key", self.vars["hotkey_monitor"])
-        self._hotkey_row(p_hot, "Mute Microphone Key", self.vars["hotkey_mute"])
+        self._hotkey_row(p_hot, "Mute Microphone Key (Primary)", self.vars["hotkey_mute"])
+        self._hotkey_row(p_hot, "Mute Microphone Key (Optional)", self.vars["hotkey_mute_2"])
         tk.Frame(p_hot, bg=Colors.CONTENT, height=10).pack()
         self._header(p_hot, "🖩 Calculator")
         self._hotkey_row(p_hot, "Toggle Calculator (hold Ctrl +)", self.vars["hotkey_calculator"])
@@ -531,7 +533,18 @@ class SettingsGUI:
                 var.set(key_str)
                 popup.destroy()
                 
+            def on_mouse(e):
+                # Button 1: Left, 2: Middle, 3: Right
+                # Many mice map XButtons to 4 (Back) and 5 (Forward) in Tkinter on Windows
+                if e.num == 4:
+                    var.set("Key.mouse_4")
+                    popup.destroy()
+                elif e.num == 5:
+                    var.set("Key.mouse_5")
+                    popup.destroy()
+                
             popup.bind("<Key>", on_key)
+            popup.bind("<Button>", on_mouse)
             popup.focus_set()
             
         btn.config(command=capture)
@@ -620,14 +633,14 @@ class SettingsGUI:
                     try: self.on_save()
                     except: pass
                     
-                tk.messagebox.showinfo(
+                messagebox.showinfo(
                     "Restart Required",
                     "Spotify settings changed. Please restart the application manually."
                 )
                 self.root.destroy()
                 return
             else:
-                tk.messagebox.showinfo("Success", "Settings saved!")
+                messagebox.showinfo("Success", "Settings saved!")
 
             # Trigger callback (which calls DisplayManager.update_config which calls update_preferences)
             if self.on_save:
@@ -637,7 +650,7 @@ class SettingsGUI:
             self.root.destroy()
         except Exception as e:
             logger.error(f"Failed to save settings: {e}")
-            tk.messagebox.showerror("Error", f"Failed to save settings:\n{e}")
+            messagebox.showerror("Error", f"Failed to save settings:\n{e}")
 
 
 def open_settings(prefs, callback=None):

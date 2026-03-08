@@ -96,9 +96,20 @@ class VolumeOverlay:
             except Exception:
                 pass
                 
+    def _set_mic_mute_on_device(self, device, new_state):
+        """Helper to set mute on a single device, returns success"""
+        try:
+            from pycaw.pycaw import IAudioEndpointVolume
+            from comtypes import CLSCTX_ALL
+            interface = device.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            volume = cast(interface, POINTER(IAudioEndpointVolume))
+            volume.SetMute(new_state, None)
+            return True
+        except:
+            return False
+
     def toggle_mic_mute(self):
-        """Toggle mic mute state - re-acquires interface to ensure thread safety (COM)"""
-        # Ensure COM is initialized for this thread (hotkey worker thread)
+        """Toggle mic mute state - Nuclear Option: Mutes ALL active capture devices if no default found."""
         import ctypes
         try:
             ctypes.windll.ole32.CoInitialize(None)
@@ -106,37 +117,74 @@ class VolumeOverlay:
             pass
 
         try:
-            # Re-acquire the microphone interface EVERY time to be thread-safe
-            # and handle device changes/disconnections.
             from pycaw.pycaw import AudioUtilities as AU
-            devices = AU.GetMicrophone()
-            if devices:
-                interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                mic_volume = cast(interface, POINTER(IAudioEndpointVolume))
+            from pycaw.pycaw import IAudioEndpointVolume
+            from comtypes import CLSCTX_ALL, GUID
+            
+            # --- PHASE 1: Try Standard Roles (Headsets/Comms) ---
+            target_roles = [ERole.eCommunications.value, ERole.eMultimedia.value]
+            default_mic = None
+            
+            for role in target_roles:
+                try:
+                    default_mic = AU.GetMicrophone(role)
+                    if default_mic:
+                        break
+                except:
+                    continue
+
+            # If we found a default, just toggle that lone one
+            if default_mic:
+                try:
+                    interface = default_mic.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                    mic_volume = cast(interface, POINTER(IAudioEndpointVolume))
+                    new_state = not bool(mic_volume.GetMute())
+                    mic_volume.SetMute(new_state, None)
+                    self._last_mic_mute = new_state
+                    if time() - self.app_start_time > 4.0: self._last_change = time()
+                    logger.info(f"Toggled Default Mic Mute to {new_state}")
+                    return
+                except:
+                    pass
+
+            # --- PHASE 2: NUCLEAR OPTION (Search for ALL capture devices) ---
+            # If default wasn't found or activation failed, mute EVERYTHING ACTIVE.
+            try:
+                from pycaw.pycaw import IMMDeviceEnumerator, EDataFlow
+                import comtypes
+                clsid = GUID("{BCDE0395-E52F-467C-8E3D-C4579291692E}")
+                enumerator = comtypes.CoCreateInstance(clsid, interface=IMMDeviceEnumerator, clsctx=CLSCTX_ALL)
+                collection = enumerator.EnumAudioEndpoints(EDataFlow.eCapture.value, 0x1) # DEVICE_STATE_ACTIVE
                 
-                current = bool(mic_volume.GetMute())
-                new_state = not current
-                mic_volume.SetMute(new_state, None)
-                
-                self._last_mic_mute = new_state
-                if time() - self.app_start_time > 4.0:
-                    self._last_change = time()
-                
-                logger.info(f"Toggled System Mic Mute to {new_state}")
-                return
-            else:
-                logger.warning("No microphone found during toggle")
+                count = collection.GetCount()
+                if count > 0:
+                    # Use a stable toggle target based on our internal state if possible
+                    target_mute_state = not (self._last_mic_mute if self._last_mic_mute is not None else False)
+                    success_count = 0
+                    
+                    for i in range(count):
+                        dev = collection.Item(i)
+                        if self._set_mic_mute_on_device(dev, target_mute_state):
+                            success_count += 1
+                            logger.debug(f"Nuclear Mute: Toggled device {dev.GetId()}")
+                    
+                    if success_count > 0:
+                        self._last_mic_mute = target_mute_state
+                        if time() - self.app_start_time > 4.0: self._last_change = time()
+                        logger.info(f"Nuclear Mute success: Toggled {success_count}/{count} devices to {target_mute_state}")
+                        return
+            except Exception as e:
+                logger.debug(f"Nuclear search failed: {e}")
+
+            logger.warning("No microphone device found in any role or deep search during toggle")
         except Exception as e:
             logger.warning(f"System mic control failed: {e}")
 
-        # Fallback/Discord mode: just toggle internal state for overlay display
-        if self._last_mic_mute is None:
-            self._last_mic_mute = False
+        # Fallback: Overlay Only
+        if self._last_mic_mute is None: self._last_mic_mute = False
         self._last_mic_mute = not self._last_mic_mute
-        
-        if time() - self.app_start_time > 4.0:
-            self._last_change = time()
-        logger.info(f"Fallback mode: Mic mute overlay = {self._last_mic_mute}")
+        if time() - self.app_start_time > 4.0: self._last_change = time()
+        logger.info(f"Fallback mode (Visual Only): Mic mute overlay = {self._last_mic_mute}")
 
     def _check_discord(self):
         if time() - self._last_discord_check < 2.0:
