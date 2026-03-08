@@ -1,5 +1,8 @@
 # GitHub Release Manual
 
+> [!IMPORTANT]
+> **STRICT RULE**: NEVER perform a `git commit`, `git push`, or `gh release` without explicit text approval from the user (e.g., "LGTM", "Proceed", or "Release it").
+
 Follow these steps to create a new release for OLED Customizer:
 
 ## 1. Build the Project
