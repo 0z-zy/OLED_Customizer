@@ -23,6 +23,7 @@ credentials.json
 yt_nowplaying.json
 *.pem
 *.crx
+!GH release manual.md
 .lock
 debug_fs.txt
 build.ps1
