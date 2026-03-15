@@ -230,3 +230,46 @@ def get_database_sizes() -> dict:
         if os.path.exists(db_path):
             sizes[name] = os.path.getsize(db_path) / 1024 / 1024
     return sizes
+
+
+def delete_backup(backup_path: str) -> bool:
+    """Delete a backup folder."""
+    logger.info(f"Backend: Attempting to delete backup at: {backup_path}")
+    if not os.path.exists(backup_path):
+        logger.error(f"Backend: Backup path does not exist: {backup_path}")
+        return False
+    try:
+        shutil.rmtree(backup_path)
+        logger.info(f"Backend: Deleted backup: {backup_path}")
+        return True
+    except Exception as e:
+        logger.error(f"Backend: Failed to delete backup {backup_path}: {e}")
+        return False
+
+
+def duplicate_backup(backup_path: str) -> Optional[str]:
+    """Duplicate a backup folder with a '_copy' suffix."""
+    if not os.path.exists(backup_path):
+        return None
+    
+    try:
+        # Create new name
+        base_dir = os.path.dirname(backup_path)
+        base_name = os.path.basename(backup_path)
+        
+        # If it already ends in a timestamp or something, just append copy
+        new_name = base_name + "_copy"
+        new_path = os.path.join(base_dir, new_name)
+        
+        # Handle collision
+        counter = 1
+        while os.path.exists(new_path):
+            new_path = os.path.join(base_dir, f"{new_name}_{counter}")
+            counter += 1
+            
+        shutil.copytree(backup_path, new_path)
+        logger.info(f"Duplicated backup: {backup_path} -> {new_path}")
+        return new_path
+    except Exception as e:
+        logger.error(f"Failed to duplicate backup {backup_path}: {e}")
+        return None

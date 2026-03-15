@@ -18,20 +18,57 @@ systray_thread = None
 
 
 def exit_app(icon):
-    icon.stop()
+    import time
+    from threading import Thread
+    
+    logger.info("Exit triggered - starting shutdown sequence")
+    
+    # Start a fail-safe "bomb" thread that forces exit after 1.5 seconds
+    def force_exit_bomb():
+        time.sleep(1.5)
+        logger.warning("Shutdown timeout reached! Forcing os._exit(0)")
+        # Final attempt at lock removal
+        lock_file_path = fetch_app_data_path('.lock')
+        if os.path.exists(lock_file_path):
+            try: os.unlink(lock_file_path)
+            except: pass
+        os._exit(0)
+    
+    Thread(target=force_exit_bomb, daemon=True, name="Exit-Bomb").start()
+
+    # Gracefully shutdown the display manager to manually release raw hooks
+    # Do this BEFORE stopping the icon to avoid pystray blocking us
+    if hasattr(icon, 'manager'):
+        try:
+            logger.debug("Shutting down DisplayManager (fast unhook)...")
+            icon.manager.shutdown()
+        except Exception as e:
+            logger.error(f"Error during manager shutdown: {e}")
+
+    try:
+        logger.debug("Stopping tray icon...")
+        icon.stop()
+    except Exception as e:
+        logger.error(f"Error stopping icon: {e}")
 
     # Remove lock file on exit
     lock_file_path = fetch_app_data_path('.lock')
     if os.path.exists(lock_file_path):
-        os.unlink(lock_file_path)
+        try:
+            os.unlink(lock_file_path)
+        except Exception:
+            pass
 
     logger.info("Disabled systray")
     
-    # Gracefully shutdown the display manager to manually release raw hooks
     if hasattr(icon, 'manager'):
-        icon.manager.shutdown()
+        try:
+            icon.manager.shutdown()
+        except Exception:
+            pass
         
-    # Hard exit immediately so we don't block on background threads
+    logger.info("Shutdown sequence finished - exiting process")
+    # Hard exit immediately
     os._exit(0)
 
 

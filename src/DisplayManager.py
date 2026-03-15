@@ -981,24 +981,28 @@ class DisplayManager:
         self.update_preferences()
         logger.info("Configuration updated successfully")
 
+    def fast_unhook(self):
+        """Emergency unhook of low-level hooks to prevent OS freeze on exit."""
+        import ctypes
+        logger.info("Performing fast unhook of LL hooks...")
+        try:
+            if hasattr(self, "_k_hook") and self._k_hook:
+                ctypes.windll.user32.UnhookWindowsHookEx(self._k_hook)
+                self._k_hook = None
+            if hasattr(self, "_m_hook") and self._m_hook:
+                ctypes.windll.user32.UnhookWindowsHookEx(self._m_hook)
+                self._m_hook = None
+            logger.info("LL hooks removed successfully.")
+        except Exception as e:
+            logger.warning(f"Fast unhook failed: {e}")
+
     def shutdown(self):
         """Gracefully stop all background threads and clean up resources."""
         logger.info("Shutting down DisplayManager...")
         self._running = False
-
-        # Properly unhook the raw windows keyboard hook from the main thread immediately.
-        # This guarantees the mouse won't freeze after exit as the hooks are explicitly dropped.
-        try:
-            import ctypes
-            user32 = ctypes.WinDLL("user32", use_last_error=True)
-            if getattr(self, "_k_hook", None):
-                user32.UnhookWindowsHookEx(self._k_hook)
-                logger.info("Manually dropped raw keyboard hook")
-            if getattr(self, "_m_hook", None):
-                user32.UnhookWindowsHookEx(self._m_hook)
-                logger.info("Manually dropped raw mouse hook")
-        except Exception as e:
-            logger.error(f"Failed to manually drop hooks: {e}")
+        
+        # Fast unhook immediately to prevent mouse freeze
+        self.fast_unhook()
 
         # Post a WM_QUIT anyway just to be polite and try to free the thread.
         # It's okay if this deadlocks internally because we already dropped the hooks.

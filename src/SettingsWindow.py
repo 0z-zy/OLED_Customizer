@@ -5,12 +5,17 @@ Frameless window, sidebar navigation, custom widgets, high-end aesthetics.
 
 import tkinter as tk
 from tkinter import ttk, colorchooser, messagebox
+import os
 import logging
+import shutil
+import ctypes
+from datetime import datetime
+from threading import Thread
 
 logger = logging.getLogger("OLED Customizer.Settings")
+from src.UserPreferences import UserPreferences
 from src.utils import set_startup, is_startup_enabled
 from src.updater import is_update_available, start_update_process
-import threading
 
 # --- THEME CONSTANTS ---
 class Colors:
@@ -158,7 +163,7 @@ class SettingsGUI:
         self.root = None
         self.vars = {}
         self.rgb = list(prefs.get_preference("rgb_color") or [0, 212, 170])
-        self.current_page = "General"
+        self.current_page = None
         self.pages = {}
         self.nav_buttons = {}
 
@@ -168,6 +173,7 @@ class SettingsGUI:
             except Exception: pass
 
         self.root = tk.Tk()
+        self.current_page = None # CRITICAL: Ensure first page logic triggers
         self.root.overrideredirect(True) # Frameless
         self.root.geometry("640x540")
         self.root.configure(bg=Colors.BG_ROOT)
@@ -179,18 +185,16 @@ class SettingsGUI:
         self.root.geometry(f"+{x}+{y}")
         
         # FIX: Force taskbar icon for frameless window
-        import ctypes
-        from ctypes import windll
         
         def set_appwindow(root):
             GWL_EXSTYLE = -20
             WS_EX_APPWINDOW = 0x00040000
             WS_EX_TOOLWINDOW = 0x00000080
-            hwnd = windll.user32.GetParent(root.winfo_id())
-            style = windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            hwnd = ctypes.windll.user32.GetParent(root.winfo_id())
+            style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
             style = style & ~WS_EX_TOOLWINDOW
             style = style | WS_EX_APPWINDOW
-            windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
             # Re-assert frame
             root.wm_withdraw()
             root.after(10, lambda: root.wm_deiconify())
@@ -227,6 +231,7 @@ class SettingsGUI:
             ("Hotkeys", "⌨️"),
             ("Lighting", "🌈"),
             ("Advanced", "🔧"),
+            ("Backups", "💾"),
             ("Logs", "📄")
         ]
         
@@ -252,6 +257,7 @@ class SettingsGUI:
         # Initialize Pages
         self._init_variables()
         self._create_pages()
+        self.root.update() # Ensure dimensions are calculated
         self._switch_page("General")
 
     def _init_variables(self):
@@ -401,6 +407,11 @@ class SettingsGUI:
                  font=FONT_SMALL, fg=Colors.TEXT_DIM, bg=Colors.CONTENT).pack(anchor="w", pady=(0, 10))
         self.pages["Advanced"] = p_adv
 
+        # -- BACKUPS PAGE --
+        p_backups = tk.Frame(self.content_area, bg=Colors.CONTENT)
+        self._create_backups_page(p_backups)
+        self.pages["Backups"] = p_backups
+
         # -- LOGS PAGE --
         p_logs = tk.Frame(self.content_area, bg=Colors.CONTENT)
         self._header(p_logs, "📄 Application Logs")
@@ -439,7 +450,144 @@ class SettingsGUI:
         
         self.pages["Logs"] = p_logs
 
+    def _create_backups_page(self, parent):
+        self._header(parent, "💾 SteelSeries Backups")
+        
+        # Tools Frame (Refresh, Backup Now)
+        tools_frame = tk.Frame(parent, bg=Colors.CONTENT)
+        tools_frame.pack(fill="x", pady=(0, 15))
+        
+        tk.Button(tools_frame, text="🔄 Refresh List", font=FONT_SMALL,
+                  bg=Colors.CARD_BG, fg=Colors.TEXT_MAIN,
+                  activebackground=Colors.CARD_HOVER, activeforeground=Colors.TEXT_MAIN,
+                  relief="flat", cursor="hand2", padx=10, pady=2,
+                  command=self._refresh_backups_list).pack(side="left", padx=(0, 10))
+        
+        tk.Button(tools_frame, text="🛡️ Backup Now", font=FONT_SMALL,
+                  bg=Colors.CARD_BG, fg=Colors.TEXT_MAIN,
+                  activebackground=Colors.CARD_HOVER, activeforeground=Colors.TEXT_MAIN,
+                  relief="flat", cursor="hand2", padx=10, pady=2,
+                  command=self._do_manual_backup).pack(side="left")
+
+        # Backups List Area
+        list_container = tk.Frame(parent, bg=Colors.INPUT_BG, highlightthickness=1, highlightbackground=Colors.BORDER)
+        list_container.pack(fill="both", expand=True)
+
+        self.backups_canvas = tk.Canvas(list_container, bg=Colors.INPUT_BG, highlightthickness=0)
+        self.backups_scrollbar = ttk.Scrollbar(list_container, orient="vertical", command=self.backups_canvas.yview)
+        self.backups_scrollable_frame = tk.Frame(self.backups_canvas, bg=Colors.INPUT_BG)
+
+        self.backups_scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.backups_canvas.configure(scrollregion=self.backups_canvas.bbox("all"))
+        )
+
+        self.backups_window = self.backups_canvas.create_window((0, 0), window=self.backups_scrollable_frame, anchor="nw")
+        self.backups_canvas.configure(yscrollcommand=self.backups_scrollbar.set)
+
+        # Sync width
+        self.backups_canvas.bind("<Configure>", lambda e: self.backups_canvas.itemconfig(self.backups_window, width=e.width))
+
+        self.backups_canvas.pack(side="left", fill="both", expand=True)
+        self.backups_scrollbar.pack(side="right", fill="y")
+        
+        # Support mouse wheel - Scoped efficiently
+        def _on_mousewheel(event):
+            self.backups_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        self.backups_canvas.bind("<Enter>", lambda e: self.backups_canvas.bind_all("<MouseWheel>", _on_mousewheel))
+        self.backups_canvas.bind("<Leave>", lambda e: self.backups_canvas.unbind_all("<MouseWheel>"))
+        
+        # Initial population
+        self.root.after(100, self._refresh_backups_list)
+
+    def _refresh_backups_list(self):
+        from src import ProfileBackup
+        # Clear child widgets
+        for widget in self.backups_scrollable_frame.winfo_children():
+            widget.destroy()
+
+        # Reset scroll position to avoid hit-testing offsets
+        self.backups_canvas.yview_moveto(0)
+
+        backups = ProfileBackup.list_backups()
+        if not backups:
+            tk.Label(self.backups_scrollable_frame, text="No backups found.", 
+                     bg=Colors.INPUT_BG, fg=Colors.TEXT_DIM, font=FONT_BODY).pack(pady=20)
+            return
+
+        for name, p, count, mtime in backups:
+            # Row Container
+            row = tk.Frame(self.backups_scrollable_frame, bg=Colors.CARD_BG)
+            row.pack(fill="x", pady=2, padx=5)
+
+            # Actions Container
+            actions_frame = tk.Frame(row, bg=Colors.CARD_BG)
+            actions_frame.pack(side="right", padx=(10, 20))
+            
+            # Duplicate Button
+            dup_btn = tk.Button(actions_frame, text="📑", font=("Segoe UI Emoji", 11),
+                                bg=Colors.CARD_BG, fg=Colors.TEXT_DIM, relief="flat", cursor="hand2",
+                                activebackground=Colors.CARD_HOVER, activeforeground=Colors.TEXT_MAIN,
+                                borderwidth=0, highlightthickness=0,
+                                command=lambda path=p: self._duplicate_backup_action(path))
+            dup_btn.pack(side="left", padx=5, pady=8)
+            
+            # Delete Button
+            del_btn = tk.Button(actions_frame, text="🗑️", font=("Segoe UI Emoji", 11),
+                                bg=Colors.CARD_BG, fg=Colors.TEXT_DIM, relief="flat", cursor="hand2",
+                                activebackground=Colors.CARD_HOVER, activeforeground=Colors.DANGER,
+                                borderwidth=0, highlightthickness=0,
+                                command=lambda path=p: self._delete_backup_action(path))
+            del_btn.pack(side="left", padx=5, pady=8)
+            
+            # Info
+            timestamp = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+            display_name = name
+            if name.startswith("pre_restore_"):
+                display_name = "🛡️ Safety: " + name.replace("pre_restore_", "")
+            
+            info_frame = tk.Frame(row, bg=Colors.CARD_BG)
+            info_frame.pack(side="left", padx=10, fill="x", expand=True)
+            
+            tk.Label(info_frame, text=display_name, font=FONT_SUBHEADER, fg=Colors.TEXT_MAIN, bg=Colors.CARD_BG).pack(anchor="w", pady=(5, 0))
+            tk.Label(info_frame, text=f"{timestamp} • {count} databases", font=FONT_SMALL, fg=Colors.TEXT_DIM, bg=Colors.CARD_BG).pack(anchor="w", pady=(0, 5))
+
+        # FORCE layout update and scrollregion sync to fix hit-detection offsets
+        self.root.update() 
+        self.backups_canvas.configure(scrollregion=self.backups_canvas.bbox("all"))
+
+    def _do_manual_backup(self):
+        from src import ProfileBackup
+        if ProfileBackup.backup_profiles():
+            messagebox.showinfo("Success", "Backup created successfully!", parent=self.root)
+            self._refresh_backups_list()
+        else:
+            messagebox.showerror("Error", "Failed to create backup.", parent=self.root)
+
+    def _delete_backup_action(self, path):
+        from src import ProfileBackup
+        name = os.path.basename(path)
+        logger.info(f"Delete requested for backup: {name}")
+        if messagebox.askyesno("Confirm Delete", f"Are you sure you want to permanently delete backup:\n{name}?", parent=self.root):
+            if ProfileBackup.delete_backup(path):
+                logger.info(f"Successfully deleted backup: {name}")
+                self._refresh_backups_list()
+            else:
+                messagebox.showerror("Error", "Failed to delete backup.", parent=self.root)
+
+    def _duplicate_backup_action(self, path):
+        from src import ProfileBackup
+        logger.info(f"Duplicate requested for backup: {os.path.basename(path)}")
+        if ProfileBackup.duplicate_backup(path):
+            self._refresh_backups_list()
+        else:
+            messagebox.showerror("Error", "Failed to duplicate backup.", parent=self.root)
+
     def _switch_page(self, page_name):
+        if self.current_page == page_name and page_name not in ["Logs", "Backups"]:
+            return
+
         # Hide all pages
         for p in self.pages.values():
             p.pack_forget()
@@ -448,15 +596,17 @@ class SettingsGUI:
         if page_name in self.pages:
             self.pages[page_name].pack(fill="both", expand=True, padx=30, pady=20)
             
-            # Auto-refresh logs when navigating to the logs page
-            if page_name == "Logs":
-                self._refresh_logs()
-            
         # Update Nav
         for name, btn in self.nav_buttons.items():
             btn.set_selected(name == page_name)
         
         self.current_page = page_name
+
+        # Refresh AFTER packing to ensure UI is ready
+        if page_name == "Logs":
+            self._refresh_logs()
+        elif page_name == "Backups":
+            self._refresh_backups_list()
 
     def _refresh_logs(self):
         """Reads the last 200 lines of debug.log and populates the text widget."""

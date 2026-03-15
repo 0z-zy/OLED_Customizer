@@ -89,8 +89,8 @@ class ExtensionReceiver:
 
     def stop(self):
         if self.server:
-            self.server.shutdown()
-            logger.info("Extension Receiver stopped")
+            # self.server.shutdown() # This can block/deadlock during app exit
+            logger.info("Extension Receiver stop triggered")
 
     def get_latest_data(self):
         return extension_storage.get_data()
