@@ -44,8 +44,8 @@ class WindowsMedia:
                     if end_s > 0 and abs(pos_s - end_s) < 0.5:
                         # Position is at the end — track is finished, skip it
                         return False
-            except Exception:
-                pass  # timeline check is best-effort
+            except Exception as e:
+                logger.debug("Timeline check failed: %s", e)  # timeline check is best-effort
 
             # Filter 3: Staleness — if last update was >60s ago and not playing,
             # the session is stale.
@@ -56,8 +56,8 @@ class WindowsMedia:
                         age = (datetime.now(timezone.utc) - timeline.last_updated_time).total_seconds()
                         if age > 60:
                             return False
-                except Exception:
-                    pass  # staleness check is best-effort
+                except Exception as e:
+                    logger.debug("Staleness check failed: %s", e)  # staleness check is best-effort
 
             return True
         except (OSError, RuntimeError):
@@ -96,8 +96,8 @@ class WindowsMedia:
                 # COM threading error - manager may be stale
                 self.manager = None
                 return {}
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Session validation failed: %s", e)
 
             current_session = None
             

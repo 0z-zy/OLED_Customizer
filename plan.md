@@ -75,54 +75,54 @@ Full project review. Items below are proposals — pick the ones you want done.
 
 ### 🔴 High Priority
 
-- [ ] **DisplayManager.py — Add graceful shutdown**
-  No `shutdown()` method exists. Six daemon threads are spawned (Hotkey-Actions, Keyboard-Hook, SMTC-poller, Spotify-Worker, plus two dynamic auth threads) with no `_running` flag or cleanup. Queues (`_hotkey_action_queue`, `_spotify_queue`) are never drained on exit. Add a `_running` flag, a `shutdown()` method that sets it to `False`, drains queues, and lets threads exit their loops cleanly.
+- [x] **DisplayManager.py — Add graceful shutdown**
+  Added `_running` flag (checked by all thread loops: `run()`, `_hotkey_action_worker`, `_spotify_worker_loop`, `_poll_smtc_loop`). Added `shutdown()` method that sets `_running = False`, drains queues, and stops the ExtensionReceiver server.
 
-- [ ] **SpotifyAPI.py — Add timeout to auth loop (line 114)**
-  `while server.code is None and server.error is None: server.handle_request()` loops forever if the user never completes browser auth. Add a time-based or iteration-based limit (e.g. 120 seconds) so the app doesn't hang permanently.
+- [x] **SpotifyAPI.py — Add timeout to auth loop (line 114)**
+  Added a 120-second `deadline` to the `while server.code is None` loop. Breaks with `"Auth timeout"` error if user never completes browser auth.
 
-- [ ] **UltimateManager.py — Remove dead code**
-  This 178-line file is not imported or referenced anywhere in the project. It's an orphaned standalone script with hardcoded paths and Turkish comments. Safe to delete.
+- [x] **UltimateManager.py — Remove dead code**
+  Deleted. 178-line orphaned standalone script with hardcoded paths, not imported anywhere.
 
 ### 🟠 Medium Priority
 
-- [ ] **SpotifyAPI.py — Cache base64 auth header (lines 167, 203)**
-  The same `b64encode(f"{client_id}:{client_secret}".encode())` is computed identically in both `retrieve_token()` and `refresh_access_token()`. Compute once in `__init__` and reuse.
+- [x] **SpotifyAPI.py — Cache base64 auth header (lines 167, 203)**
+  Computed once in `__init__` as `self._basic_auth`. Both `retrieve_token()` and `refresh_access_token()` now use the cached value. Also refreshed in `reload_config()` when credentials change.
 
-- [ ] **ExtensionReceiver.py — Fix Content-Length crash (line 30)**
-  `int(self.headers['Content-Length'])` raises `KeyError` if the header is missing. Use `self.headers.get('Content-Length', '0')` and add a max-size check to prevent huge payloads.
+- [x] **ExtensionReceiver.py — Fix Content-Length crash (line 30)**
+  Changed to `self.headers.get('Content-Length', '0')` with `ValueError` handling and a 1 MB `MAX_BODY_SIZE` limit. Returns 413 for oversized payloads, 400 for invalid headers.
 
-- [ ] **ExtensionReceiver.py — Add server shutdown method**
-  `serve_forever()` runs with no way to stop it. Expose a `stop()` that calls `server.shutdown()` so it can be cleaned up with DisplayManager.
+- [x] **ExtensionReceiver.py — Add server shutdown method**
+  Added `stop()` method that calls `self.server.shutdown()`. Called from `DisplayManager.shutdown()`.
 
-- [ ] **volume.py — Extract shared mic-init helper (lines 37-55, 250-259)**
-  Microphone initialisation code (pycaw `GetMicrophone` → `Activate` → `IAudioEndpointVolume`) is duplicated between `__init__` and the re-init path in `update()`. Extract to a `_init_microphone()` method.
+- [x] **volume.py — Extract shared mic-init helper (lines 37-55, 250-259)**
+  Extracted `_init_microphone()` method. Called from `__init__` and from the re-init path in `update()` (replacing the duplicated code block).
 
-- [ ] **fps_monitor.py — Log errors in worker loop (lines 107-108)**
-  `except Exception: pass` silently swallows all DLL call errors. Replace with `except Exception as e: logger.debug("FPS worker error: %s", e)` so problems are diagnosable.
+- [x] **fps_monitor.py — Log errors in worker loop (lines 107-108)**
+  Replaced `except Exception: pass` with `except Exception as e: logger.debug("FPS worker error: %s", e)`.
 
-- [ ] **Systray.py — Close icon image resource (line 497)**
-  `Image.open(icon_path)` is never closed. Since pystray keeps a reference to the image, the simplest fix is to keep it open but note it, or copy the image data and close the file handle.
+- [x] **Systray.py — Close icon image resource (line 497)**
+  Changed to `with Image.open(...) as img: icon_image = img.copy()` so the file handle is properly released.
 
-- [ ] **WindowsMedia.py — Add logging to silent except blocks (lines 85-100)**
-  Multiple `except Exception: pass` blocks hide failures in SMTC media info retrieval. Add `logger.debug()` calls so problems can be traced.
+- [x] **WindowsMedia.py — Add logging to silent except blocks (lines 85-100)**
+  Added `logger.debug()` calls to the timeline check, staleness check, and session validation `except` blocks.
 
 ### 🟡 Low Priority
 
-- [ ] **Timer.py — Deduplicate font path resolution (lines 35-38)**
-  `fetch_content_path('fonts/DS-DIGIB.ttf')` is called four times for the same file. Resolve path once, then pass it to `safe_load_font()` four times with different sizes.
+- [x] **Timer.py — Deduplicate font path resolution (lines 35-38)**
+  Resolved `fetch_content_path('fonts/DS-DIGIB.ttf')` once into `digi_path`, then passed it to `safe_load_font()` four times.
 
-- [ ] **UserPreferences.py — Use deep copy for DEFAULT (line 50)**
-  `self.DEFAULT.copy()` is a shallow copy. Currently safe because DEFAULT has no nested dicts, but `copy.deepcopy()` or `json.loads(json.dumps(...))` would be future-proof.
+- [x] **UserPreferences.py — Use deep copy for DEFAULT (line 50)**
+  Changed from `self.DEFAULT.copy()` to `copy.deepcopy(self.DEFAULT)` for future-proof safety.
 
-- [ ] **SpotifyAPI.py — Close socket in error paths (line 299)**
-  The `socket.socket()` in the OAuth callback server isn't always closed in error branches. Wrap in a context manager.
+- [x] **SpotifyAPI.py — Close socket in error paths (line 299)**
+  Added `close()` method to `RawSpotifyServer`. Called from `fetch_token()` after the auth loop completes (success or timeout).
 
-- [ ] **text_rendering.py — Check for dead code**
-  `truncate_text()` appears unused. Verify whether it's called anywhere; if not, remove it.
+- [x] **text_rendering.py — Check for dead code**
+  Confirmed `truncate_text()` is not called anywhere in the project. Removed.
 
-- [ ] **updater.py — Harden version parsing (line 36)**
-  `.split('"')[1]` assumes exact format. Use regex: `re.search(r'__version__\s*=\s*"([^"]+)"', content).group(1)` for robustness.
+- [x] **updater.py — Harden version parsing (line 36)**
+  Replaced `.split('"')[1]` with `re.search(r'__version__\s*=\s*"([^"]+)"', line)` for robust parsing.
 
 ### ✅ Already Done
 

@@ -32,10 +32,11 @@ class Timer:
                     # Absolute emergency fallback
                     return None
 
-        self.FONT_DIGI_BIG = safe_load_font(fetch_content_path('fonts/DS-DIGIB.ttf'), 24)
-        self.FONT_DIGI_MED = safe_load_font(fetch_content_path('fonts/DS-DIGIB.ttf'), 20)
-        self.FONT_DIGI_SMALL = safe_load_font(fetch_content_path('fonts/DS-DIGIB.ttf'), 14)
-        self.FONT_HUGE = safe_load_font(fetch_content_path('fonts/DS-DIGIB.ttf'), 38)
+        digi_path = fetch_content_path('fonts/DS-DIGIB.ttf')
+        self.FONT_DIGI_BIG = safe_load_font(digi_path, 24)
+        self.FONT_DIGI_MED = safe_load_font(digi_path, 20)
+        self.FONT_DIGI_SMALL = safe_load_font(digi_path, 14)
+        self.FONT_HUGE = safe_load_font(digi_path, 38)
 
     def set_style(self, style):
         self.style = style

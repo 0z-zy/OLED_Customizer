@@ -34,25 +34,8 @@ class VolumeOverlay:
         except Exception as e:
             logger.warning("Speaker init failed: %s", e)
 
-        # Init Mic (Communication Default) - using pycaw
-        try:
-            # Get the default communications microphone
-            from pycaw.pycaw import AudioUtilities as AU
-            devices = AU.GetMicrophone()
-            if devices:
-                interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                self._mic_volume = cast(interface, POINTER(IAudioEndpointVolume))
-            else:
-                logger.warning("No microphone found")
-        except Exception as e:
-            logger.warning(f"Microphone init failed: {e}")
-            try:
-                # Fallback
-                device = AudioUtilities.GetMicrophone()
-                interface = device.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                self._mic_volume = interface.QueryInterface(IAudioEndpointVolume)
-            except Exception:
-                pass
+        # Init Mic
+        self._init_microphone()
 
         # Load Icons (V4)
         self.icons = {}
@@ -64,6 +47,26 @@ class VolumeOverlay:
         
         # Initial state fetch to prevent showing overlay on startup
         self._silent_init()
+
+    def _init_microphone(self):
+        """Initialize the default communications microphone via pycaw."""
+        self._mic_volume = None
+        try:
+            from pycaw.pycaw import AudioUtilities as AU
+            devices = AU.GetMicrophone()
+            if devices:
+                interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                self._mic_volume = cast(interface, POINTER(IAudioEndpointVolume))
+            else:
+                logger.warning("No microphone found")
+        except Exception as e:
+            logger.warning(f"Microphone init failed: {e}")
+            try:
+                device = AudioUtilities.GetMicrophone()
+                interface = device.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                self._mic_volume = interface.QueryInterface(IAudioEndpointVolume)
+            except Exception:
+                pass
 
     def _silent_init(self):
         """Fetch initial state without triggering the overlay."""
@@ -248,15 +251,9 @@ class VolumeOverlay:
             except Exception as e:
                 logger.debug(f"Mic update failed: {e}")
                 # Try to re-init mic (device may have changed)
-                try:
-                    from pycaw.pycaw import AudioUtilities as AU
-                    devices = AU.GetMicrophone()
-                    if devices:
-                        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                        self._mic_volume = cast(interface, POINTER(IAudioEndpointVolume))
-                        logger.warning("Re-initialized microphone interface after failure")
-                except Exception:
-                    self._mic_volume = None
+                self._init_microphone()
+                if self._mic_volume:
+                    logger.warning("Re-initialized microphone interface after failure")
         
         if changed:
             # Shield against startup flicker - wait 4 seconds before allowing overlay to show

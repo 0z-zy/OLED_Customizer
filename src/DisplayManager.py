@@ -37,6 +37,7 @@ class DisplayManager:
         self.config = config
         self.fps = fps
         self.state = State.SHOW_CLOCK
+        self._running = True
 
         self.enabled = True
         self.display_clock = True
@@ -222,7 +223,7 @@ class DisplayManager:
         Actions like toggle_mic_mute use COM calls that can take 100ms+,
         which would cause the hook to be silently removed by Windows.
         """
-        while True:
+        while self._running:
             try:
                 action = self._hotkey_action_queue.get(timeout=2.0)
                 if action == "trigger_monitor":
@@ -609,7 +610,7 @@ class DisplayManager:
         Thread(target=startup_auth, daemon=True).start()
 
     def run(self):
-        while True:
+        while self._running:
             if not self.enabled:
                 sleep(1 / self.fps)
                 if self.state != -1: # Reset state visualization if disabled
@@ -817,7 +818,7 @@ class DisplayManager:
 
     def _spotify_worker_loop(self):
         """Persistent worker thread for Spotify polling (prevents thread leak)."""
-        while True:
+        while self._running:
             try:
                 spotify_api = self._spotify_queue.get(timeout=2.0)
                 self._poll_spotify(spotify_api)
@@ -967,6 +968,28 @@ class DisplayManager:
         self.update_preferences()
         logger.info("Configuration updated successfully")
 
+    def shutdown(self):
+        """Gracefully stop all background threads and clean up resources."""
+        logger.info("Shutting down DisplayManager...")
+        self._running = False
+
+        # Drain queues so threads waiting on .get() can exit
+        for q in (self._hotkey_action_queue, self._spotify_queue):
+            try:
+                while not q.empty():
+                    q.get_nowait()
+            except Exception:
+                pass
+
+        # Stop the extension receiver HTTP server
+        if hasattr(self, "extension_receiver"):
+            try:
+                self.extension_receiver.stop()
+            except Exception:
+                pass
+
+        logger.info("DisplayManager shutdown complete")
+
     def _poll_smtc_loop(self):
         """Background thread that polls SMTC every 200ms using a persistent event loop."""
         import ctypes
@@ -978,7 +1001,7 @@ class DisplayManager:
         logger.info("SMTC poll loop started")
 
         async def runner():
-            while True:
+            while self._running:
                 try:
                     data = await self.windows_media.get_media_info()
                     with self._smtc_lock:
@@ -998,7 +1021,7 @@ class DisplayManager:
                 await asyncio.sleep(0.2)
 
         # Keep restarting the loop if it crashes (SMTC/WinRT can be unstable)
-        while True:
+        while self._running:
             try:
                 # Use persistent event loop instead of asyncio.run() to avoid thread issues
                 loop = asyncio.new_event_loop()

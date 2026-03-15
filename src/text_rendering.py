@@ -1,19 +1,5 @@
 from PIL import Image, ImageDraw
 
-def truncate_text(font, text, max_width):
-    if not text: return ""
-    
-    # Check if fits (rough check)
-    if font.getlength(text) <= max_width:
-        return text
-        
-    # Truncate
-    for i in range(len(text), 0, -1):
-        sub = text[:i] + "..."
-        if font.getlength(sub) <= max_width:
-            return sub
-    return "..."
-
 class MarqueeText:
     def __init__(self, font, width, text=""):
         self.font = font

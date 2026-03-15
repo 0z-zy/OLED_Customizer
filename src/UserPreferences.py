@@ -1,5 +1,6 @@
 from os import path, getenv, makedirs
 from json import loads, dumps
+from copy import deepcopy
 
 import logging
 import ctypes
@@ -47,7 +48,7 @@ class UserPreferences:
 
     def __init__(self):
         self.valid = True
-        self.preferences = self.DEFAULT.copy()
+        self.preferences = deepcopy(self.DEFAULT)
         self.config_path = fetch_app_data_path("config.json")
         logger.info("Preferences path : " + self.config_path)
 

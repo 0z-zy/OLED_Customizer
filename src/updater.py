@@ -1,5 +1,6 @@
 import requests
 import os
+import re
 import sys
 import subprocess
 import logging
@@ -19,8 +20,9 @@ def get_latest_version():
             content = response.text
             for line in content.splitlines():
                 if '__version__' in line:
-                    version = line.split('"')[1]
-                    return version
+                    m = re.search(r'__version__\s*=\s*"([^"]+)"', line)
+                    if m:
+                        return m.group(1)
     except Exception as e:
         logger.error(f"Failed to fetch latest version: {e}")
     return None

@@ -104,8 +104,8 @@ class FPSMonitor:
                 else:
                     with self._lock:
                         self._fps_value = 0
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("FPS worker error: %s", e)
             time.sleep(0.5)
 
     def get_fps(self) -> int:

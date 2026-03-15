@@ -494,7 +494,8 @@ def run_systray_async(display_manager):
     # Systray ikonunu yükle: yoksa fallback oluştur
     try:
         icon_path = fetch_content_path("assets/icons/icon.png")
-        icon_image = Image.open(icon_path)
+        with Image.open(icon_path) as img:
+            icon_image = img.copy()
     except Exception:
         # icon.png yoksa basit 16x16 siyah kare kullan
         icon_image = Image.new("1", (16, 16), 0)

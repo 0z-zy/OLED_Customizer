@@ -34,6 +34,9 @@ class SpotifyAPI:
         self.token = ""
         self.expires = -1
         
+        # Cached base64 auth header (reused in retrieve_token / refresh_access_token)
+        self._basic_auth = b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode() if self.client_id and self.client_secret else ""
+        
         # urllib3 PoolManager for lean HTTP calls
         self._http = urllib3.PoolManager(
             headers={"Connection": "keep-alive"},
@@ -69,6 +72,8 @@ class SpotifyAPI:
 
         if changed:
             logger.info("Spotify credentials reloaded from config (CHANGED).")
+            # Refresh cached auth header
+            self._basic_auth = b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode() if self.client_id and self.client_secret else ""
             # Invalidate old token file because it likely belongs to the old credentials
             try:
                 os.remove(fetch_app_data_path("credentials.json"))
@@ -111,8 +116,16 @@ class SpotifyAPI:
 
                 webbrowser.open(url)
 
+                deadline = time() + 120  # 2-minute timeout
                 while server.code is None and server.error is None:
+                    if time() >= deadline:
+                        logger.warning("Auth timeout: user did not complete browser auth within 120 seconds")
+                        server.error = "Auth timeout"
+                        break
                     server.handle_request()
+
+                # Clean up the listening socket
+                server.close()
 
                 if server.code:
                     self.retrieve_token(server.code)
@@ -164,7 +177,6 @@ class SpotifyAPI:
     def retrieve_token(self, code):
         """Exchange authorization code for access token."""
         try:
-            auth_header = b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
             body = urlencode({
                 "grant_type": "authorization_code",
                 "code": code,
@@ -175,7 +187,7 @@ class SpotifyAPI:
                 "POST",
                 self.SPOTIFY_API_URL + "/api/token",
                 headers={
-                    "Authorization": f"Basic {auth_header}",
+                    "Authorization": f"Basic {self._basic_auth}",
                     "Content-Type": "application/x-www-form-urlencoded"
                 },
                 body=body
@@ -200,7 +212,6 @@ class SpotifyAPI:
     def refresh_access_token(self):
         """Refresh the access token using the refresh token."""
         try:
-            auth_header = b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
             body = urlencode({
                 "grant_type": "refresh_token",
                 "refresh_token": self.refresh_token
@@ -210,7 +221,7 @@ class SpotifyAPI:
                 "POST",
                 self.SPOTIFY_API_URL + "/api/token",
                 headers={
-                    "Authorization": f"Basic {auth_header}",
+                    "Authorization": f"Basic {self._basic_auth}",
                     "Content-Type": "application/x-www-form-urlencoded"
                 },
                 body=body
@@ -349,5 +360,14 @@ class SpotifyAPI:
                     pass
                 except Exception as e:
                     pass
+
+            def close(self):
+                """Close the listening socket."""
+                if self.socket:
+                    try:
+                        self.socket.close()
+                    except Exception:
+                        pass
+                    self.socket = None
                     
         return RawSpotifyServer(self.port, self.redirect_uri)

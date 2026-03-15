@@ -25,9 +25,25 @@ class ExtensionData:
 extension_storage = ExtensionData()
 
 class ExtensionHandler(BaseHTTPRequestHandler):
+    MAX_BODY_SIZE = 1_048_576  # 1 MB limit
+
     def do_POST(self):
         if self.path == '/extension_data':
-            content_length = int(self.headers['Content-Length'])
+            raw = self.headers.get('Content-Length', '0')
+            try:
+                content_length = int(raw)
+            except (ValueError, TypeError):
+                self.send_response(400)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                return
+
+            if content_length > self.MAX_BODY_SIZE:
+                self.send_response(413)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                return
+
             post_data = self.rfile.read(content_length)
             
             try:
@@ -70,6 +86,11 @@ class ExtensionReceiver:
 
         self.thread = threading.Thread(target=run_server, daemon=True)
         self.thread.start()
+
+    def stop(self):
+        if self.server:
+            self.server.shutdown()
+            logger.info("Extension Receiver stopped")
 
     def get_latest_data(self):
         return extension_storage.get_data()
