@@ -27,16 +27,12 @@ def exit_app(icon):
 
     logger.info("Disabled systray")
     
-    # Gracefully shutdown the display manager to release raw hooks
+    # Gracefully shutdown the display manager to manually release raw hooks
     if hasattr(icon, 'manager'):
         icon.manager.shutdown()
         
-    # Wait briefly then exit
-    import time
-    def _delayed_exit():
-        time.sleep(0.5)
-        os._exit(0)
-    Thread(target=_delayed_exit, daemon=True).start()
+    # Hard exit immediately so we don't block on background threads
+    os._exit(0)
 
 
 def toggle_enabled(icon):

@@ -265,9 +265,12 @@ class DisplayManager:
             import ctypes
             from ctypes import wintypes, POINTER, Structure, byref
 
-            # Register the thread ID. This allows `shutdown()` to post a WM_QUIT
-            # message directly to this thread, breaking the GetMessageW loop cleanly.
+            # Register the thread ID.
             self._hook_thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
+
+            # Store hook handles explicitly for manual cleanup on shutdown
+            self._k_hook = None
+            self._m_hook = None
 
             # Use WinDLL with use_last_error for proper error reporting
             user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -522,10 +525,10 @@ class DisplayManager:
             self._mouse_hook_proc = _mouse_hook_callback
 
             hmod = kernel32.GetModuleHandleW(None)
-            k_hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, _hook_callback, hmod, 0)
-            m_hook = user32.SetWindowsHookExW(WH_MOUSE_LL, _mouse_hook_callback, hmod, 0)
+            self._k_hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, _hook_callback, hmod, 0)
+            self._m_hook = user32.SetWindowsHookExW(WH_MOUSE_LL, _mouse_hook_callback, hmod, 0)
 
-            if not k_hook or not m_hook:
+            if not self._k_hook or not self._m_hook:
                 err = ctypes.get_last_error()
                 logger.error(f"SetWindowsHookExW failed (error {err})")
                 return
@@ -539,9 +542,11 @@ class DisplayManager:
                     user32.TranslateMessage(byref(msg))
                     user32.DispatchMessageW(byref(msg))
             finally:
-                user32.UnhookWindowsHookEx(k_hook)
-                user32.UnhookWindowsHookEx(m_hook)
-                logger.info("Hooks removed")
+                if self._k_hook:
+                    user32.UnhookWindowsHookEx(self._k_hook)
+                if self._m_hook:
+                    user32.UnhookWindowsHookEx(self._m_hook)
+                logger.info("Hooks removed locally from thread exit")
 
         except Exception as e:
             # This thread is non-critical — never crash the app
@@ -981,15 +986,28 @@ class DisplayManager:
         logger.info("Shutting down DisplayManager...")
         self._running = False
 
-        # Properly unhook the raw windows keyboard hook by sending WM_QUIT
-        if self._hook_thread_id:
+        # Properly unhook the raw windows keyboard hook from the main thread immediately.
+        # This guarantees the mouse won't freeze after exit as the hooks are explicitly dropped.
+        try:
+            import ctypes
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            if getattr(self, "_k_hook", None):
+                user32.UnhookWindowsHookEx(self._k_hook)
+                logger.info("Manually dropped raw keyboard hook")
+            if getattr(self, "_m_hook", None):
+                user32.UnhookWindowsHookEx(self._m_hook)
+                logger.info("Manually dropped raw mouse hook")
+        except Exception as e:
+            logger.error(f"Failed to manually drop hooks: {e}")
+
+        # Post a WM_QUIT anyway just to be polite and try to free the thread.
+        # It's okay if this deadlocks internally because we already dropped the hooks.
+        if getattr(self, "_hook_thread_id", None):
             try:
                 import ctypes
-                # PostThreadMessageW: idThread, Msg (0x0012 = WM_QUIT), wParam, lParam
                 ctypes.windll.user32.PostThreadMessageW(self._hook_thread_id, 0x0012, 0, 0)
-                logger.info(f"Sent WM_QUIT to hook thread ID {self._hook_thread_id}")
-            except Exception as e:
-                logger.error(f"Failed to post quit message to hook thread: {e}")
+            except Exception:
+                pass
 
         # Drain queues so threads waiting on .get() can exit
         for q in (self._hotkey_action_queue, self._spotify_queue):
