@@ -2,7 +2,125 @@
 
 ---
 
-## Plan: Fix Garbage Collection Crash in SteelSeries API
+## Plan: Fix Missing WinRT Collections & Storage (Root Cause Found)
+
+**Date:** 2026-03-15 20:45
+
+### Problem
+The `ModuleNotFoundError` for `winrt.windows.foundation.collections` was happening even in the development environment because those specific sub-packages (Collections and Storage) were never installed. They are "lazy-loaded" by Windows Media components, which is why we didn't catch them until now.
+
+### Solution
+1. **Installed Missing Packages:** I ran `pip install winrt-Windows.Foundation.Collections winrt-Windows.Storage`.
+2. **Verified Dev:** A diagnostic script now successfully retrieves media sessions without errors.
+3. **Spec Update:** Update `OLED-Customizer.spec` to explicitly `collect_all` on these new namespaces.
+
+---
+
+
+---
+
+## Plan: Fix Missing WinRT Modules & Deadlock on Exit
+
+**Date:** 2026-03-15 20:25
+
+### Problem 1: WinRT Module Still Missing
+PyInstaller's `hiddenimports` failed to bundle the underlying compiled C extensions for `winrt` (e.g. `_winrt_windows_foundation.cp313-win_amd64.pyd`).
+### Solution 1
+Modify `OLED-Customizer.spec` to explicitly add `_winrt_windows_foundation` and `_winrt_windows_media_control` as hidden imports.
+
+### Problem 2: Deadlock on Exit
+The previous `WM_QUIT` fix causes a deadlock because a Windows thread created without a window often ignores message queue posts. This prevents `GetMessageW` from ever returning, causing `Systray.py`'s `icon.manager.shutdown()` to block indefinitely.
+### Solution 2
+- **`DisplayManager.py`**: Save the hook handles (`self._k_hook`, `self._m_hook`). In `shutdown()`, explicitly call `UnhookWindowsHookEx` on both from the main thread before setting `_running = False`.
+- **`Systray.py`**: Revert to calling `os._exit(0)` immediately *after* `icon.manager.shutdown()` cleans up the hooks.
+
+---
+
+
+---
+
+## Plan: Fix Windows Input Freeze on App Exit
+
+**Date:** 2026-03-15 20:20
+
+### Problem
+When the user clicks "Exit", their entire computer mouse/keyboard input freezes for 2-3 seconds. This happens because the new "Check for Bugs and Optimize" Copilot branch introduced a low-level Global Windows Hook (`WH_KEYBOARD_LL` and `WH_MOUSE_LL`) to fix the Hotkey issues in games.
+However, `Systray.py` calls `os._exit(0)` to instantly terminate the app. This sudden death prevents Windows from cleanly unregistering the hooks. Windows freezes input momentarily while waiting for those dead hooks to respond before forcefully dropping them.
+
+### Solution
+- **`Systray.py`**: Call `icon.manager.shutdown()` before exiting.
+- **`DisplayManager.py`**: Save the Thread ID of the hook loop, and during `shutdown()`, send a `WM_QUIT` signal via `PostThreadMessageW` so the `GetMessageW` loop breaks safely and executes `UnhookWindowsHookEx`.
+- Rebuild the executable.
+
+---
+
+
+## Plan: Fix Missing WinRT Collection Module in EXE
+
+**Date:** 2026-03-15 20:16
+
+### Problem
+
+After building the optimized executable with the new Logs tab, the `WindowsMedia.py` module started throwing `Session validation failed: No module named 'winrt.windows.foundation.collections'`. PyInstaller failed to package this specific WinRT submodule because it is likely imported dynamically by another WinRT component.
+
+### Solution
+
+- Edit `OLED-Customizer.spec`.
+- Add `'winrt.windows.foundation.collections'` to the explicit `hiddenimports` list.
+- Rebuild the executable.
+
+---
+## Plan: Add Logs Window to Settings
+
+**Date:** 2026-03-15 20:10
+
+### Goal
+
+Add a new "Logs" tab to the Settings window to allow users to view `debug.log` directly from the app interface.
+
+### Steps
+
+1.  **UI Updates**: Modify `SettingsWindow.py` to add "Logs" to the sidebar.
+2.  **Display Widget**: Add a `tk.Text` widget with a scrollbar on the new Logs page.
+3.  **Data Loading**: Implement a function to read the last 200 lines of `%APPDATA%/OLED Customizer/debug.log`.
+4.  **Utilities**: Add "Refresh" and "Open Folder" buttons.
+
+### Verification
+
+- Ensure the Logs tab renders correctly.
+- Test that logs actually load and scrolling works.
+- Confirm "Open Folder" correctly opens the AppData directory.
+
+---
+
+### Old Plans
+
+---
+
+### [ARCHIVE] Plan: Review and Merge Copilot "Check for Bugs and Optimize"
+
+**Date:** 2026-03-15 19:35
+
+#### Goal Case 3
+
+Review the work done by Copilot in the `copilot/check-for-bugs-and-optimize` branch and merge it into `main` if it looks good.
+
+#### Changes Summary Case 3
+
+- **Optimizations**: `DisplayManager`, `SpotifyAPI`, and `ExtensionReceiver` have been refactored for better performance and resource handling.
+- **Bug Fixes**: Handled potential crashes in `ExtensionReceiver` and refined microphone detection in `volume.py`.
+- **Cleanup**: Deleted `src/UltimateManager.py` (Copilot claims it is dead code).
+- **Hardening**: Improved version parsing and configuration handling.
+
+#### Steps Case 3
+
+1. **Explain**: Provide a simple "Vibe Coder" guide to Branches and PRs.
+2. **Review**: Show how to use VS Code's "Source Control" tab to compare branches.
+3. **Merge**: Guide the user through the merge process if they approve.
+
+---
+
+### [ARCHIVE] Plan: Fix Garbage Collection Crash in SteelSeries API
 
 **Date:** 2026-03-08
 

@@ -226,7 +226,8 @@ class SettingsGUI:
             ("Spotify", "🎵"),
             ("Hotkeys", "⌨️"),
             ("Lighting", "🌈"),
-            ("Advanced", "🔧")
+            ("Advanced", "🔧"),
+            ("Logs", "📄")
         ]
         
         for name, icon in nav_items:
@@ -400,6 +401,44 @@ class SettingsGUI:
                  font=FONT_SMALL, fg=Colors.TEXT_DIM, bg=Colors.CONTENT).pack(anchor="w", pady=(0, 10))
         self.pages["Advanced"] = p_adv
 
+        # -- LOGS PAGE --
+        p_logs = tk.Frame(self.content_area, bg=Colors.CONTENT)
+        self._header(p_logs, "📄 Application Logs")
+        
+        # Tools Frame (Refresh, Open Folder)
+        tools_frame = tk.Frame(p_logs, bg=Colors.CONTENT)
+        tools_frame.pack(fill="x", pady=(0, 10))
+        
+        refresh_btn = tk.Button(tools_frame, text="🔄 Refresh Logs", font=FONT_SMALL,
+                                bg=Colors.CARD_BG, fg=Colors.TEXT_MAIN,
+                                activebackground=Colors.CARD_HOVER, activeforeground=Colors.TEXT_MAIN,
+                                relief="flat", cursor="hand2", padx=10, pady=2,
+                                command=self._refresh_logs)
+        refresh_btn.pack(side="left", padx=(0, 10))
+        
+        open_folder_btn = tk.Button(tools_frame, text="📂 Open Log Folder", font=FONT_SMALL,
+                                    bg=Colors.CARD_BG, fg=Colors.TEXT_MAIN,
+                                    activebackground=Colors.CARD_HOVER, activeforeground=Colors.TEXT_MAIN,
+                                    relief="flat", cursor="hand2", padx=10, pady=2,
+                                    command=self._open_log_folder)
+        open_folder_btn.pack(side="left")
+        
+        # Log Text Area
+        log_frame = tk.Frame(p_logs, bg=Colors.INPUT_BG, highlightthickness=1, highlightbackground=Colors.BORDER)
+        log_frame.pack(fill="both", expand=True)
+        
+        self.log_text = tk.Text(log_frame, bg=Colors.INPUT_BG, fg=Colors.TEXT_MAIN, 
+                                font=("Consolas", 9), wrap="word", state="disabled", 
+                                relief="flat", padx=10, pady=10)
+        self.log_text.pack(side="left", fill="both", expand=True)
+        
+        # Use proper style for scrollbar to fit dark theme if possible, standard as fallback
+        log_scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.log_text.yview)
+        log_scroll.pack(side="right", fill="y")
+        self.log_text.configure(yscrollcommand=log_scroll.set)
+        
+        self.pages["Logs"] = p_logs
+
     def _switch_page(self, page_name):
         # Hide all pages
         for p in self.pages.values():
@@ -409,11 +448,60 @@ class SettingsGUI:
         if page_name in self.pages:
             self.pages[page_name].pack(fill="both", expand=True, padx=30, pady=20)
             
+            # Auto-refresh logs when navigating to the logs page
+            if page_name == "Logs":
+                self._refresh_logs()
+            
         # Update Nav
         for name, btn in self.nav_buttons.items():
             btn.set_selected(name == page_name)
         
         self.current_page = page_name
+
+    def _refresh_logs(self):
+        """Reads the last 200 lines of debug.log and populates the text widget."""
+        import os
+        from src.utils import fetch_app_data_path
+        
+        self.log_text.config(state="normal")
+        self.log_text.delete(1.0, tk.END)
+        
+        app_data_path = fetch_app_data_path()
+        log_file = os.path.join(app_data_path, "debug.log")
+        
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+                    # Read all lines and keep only the last N (prevent lagging UI)
+                    lines = f.readlines()
+                    max_lines = 200
+                    display_lines = lines[-max_lines:] if len(lines) > max_lines else lines
+                    
+                    if len(lines) > max_lines:
+                        self.log_text.insert(tk.END, f"... {len(lines) - max_lines} older lines omitted ...\n\n")
+                    
+                    self.log_text.insert(tk.END, "".join(display_lines))
+            except Exception as e:
+                self.log_text.insert(tk.END, f"Error reading log file: {e}")
+        else:
+            self.log_text.insert(tk.END, "Log file not found. It will be created when events occur.")
+            
+        self.log_text.config(state="disabled")
+        # Scroll to bottom
+        self.log_text.yview_moveto(1.0)
+
+    def _open_log_folder(self):
+        """Opens the app data folder natively."""
+        import os
+        import subprocess
+        from src.utils import fetch_app_data_path
+        
+        app_data_path = fetch_app_data_path()
+        if os.path.exists(app_data_path):
+            try:
+                os.startfile(app_data_path)
+            except AttributeError: # Non-Windows fallback
+                subprocess.call(["explorer", app_data_path])
 
     def _exclusive_toggle(self, updated_key, other_key):
         """Ensures that if one is enabled, the other is disabled."""
