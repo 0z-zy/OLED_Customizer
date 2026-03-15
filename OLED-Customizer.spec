@@ -148,6 +148,7 @@ a = Analysis(
         'requests', 'win32gui', 'win32api', 'win32con', 'win32process',
         'pystray', 'asyncio', 'winrt', 'winrt.windows.media.control',
         'winrt.windows.foundation', 'winrt.windows.media',
+        'winrt.windows.foundation.collections',
         'HardwareMonitor', 'HardwareMonitor.Hardware',
         'clr', 'pythonnet', 'tkinter', 'pynput', 'pynput.keyboard',
         'pynput.mouse', 'pynput.keyboard._win32', 'pynput.mouse._win32',
