@@ -17,7 +17,7 @@ def get_address():
         with open(CORE_PROPS_PATH, "r") as f:
             data = json.load(f)
             return f"http://{data['address']}"
-    except:
+    except Exception:
         print("SteelSeries Engine bulunamadı!")
         return None
 
@@ -97,7 +97,7 @@ def main():
                 try:
                     with open(NOW_PLAYING_FILE, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                except:
+                except Exception:
                     pass
 
             # Veri var mı ve güncel mi? (Pause değilse)

@@ -104,7 +104,7 @@ class FPSMonitor:
                 else:
                     with self._lock:
                         self._fps_value = 0
-            except:
+            except Exception:
                 pass
             time.sleep(0.5)
 
@@ -117,4 +117,4 @@ class FPSMonitor:
         if self._lib:
             try:
                 self._lib.StopEventRecording()
-            except: pass
+            except Exception: pass

@@ -165,7 +165,7 @@ class SettingsGUI:
     def show(self):
         if self.root:
             try: self.root.lift(); return
-            except: pass
+            except Exception: pass
 
         self.root = tk.Tk()
         self.root.overrideredirect(True) # Frameless
@@ -432,12 +432,12 @@ class SettingsGUI:
                 val = v.get()
                 if k in ["scrollbar_padding", "text_padding_left", "local_port"]:
                     try: val = int(val)
-                    except: val = 0
+                    except Exception: val = 0
                 elif k == "date_format":
                     val = 24 if val else 12
                 elif k == "hw_polling_interval":
                     try: val = int(val)
-                    except: val = 1000
+                    except Exception: val = 1000
                 self.prefs.preferences[k] = val
             
             self.prefs.preferences["rgb_color"] = self.rgb
@@ -446,7 +446,7 @@ class SettingsGUI:
             # Trigger callback silently
             if self.on_save:
                 try: self.on_save()
-                except: pass
+                except Exception: pass
         except Exception as e:
             logger.error(f"Quick save failed: {e}")
 
@@ -608,13 +608,13 @@ class SettingsGUI:
                 
                 if k in ["scrollbar_padding", "text_padding_left", "local_port"]:
                     try: val = int(val)
-                    except: val = 0
+                    except Exception: val = 0
                     self.prefs.preferences[k] = val
                 elif k == "date_format":
                     self.prefs.preferences[k] = 24 if val else 12
                 elif k == "hw_polling_interval":
                     try: self.prefs.preferences[k] = int(val)
-                    except: self.prefs.preferences[k] = 1000
+                    except Exception: self.prefs.preferences[k] = 1000
                 else:
                     self.prefs.preferences[k] = val
             
@@ -631,7 +631,7 @@ class SettingsGUI:
                 # Trigger callback BEFORE destroying (so reload_config deletes credentials.json)
                 if self.on_save:
                     try: self.on_save()
-                    except: pass
+                    except Exception: pass
                     
                 messagebox.showinfo(
                     "Restart Required",
@@ -645,7 +645,7 @@ class SettingsGUI:
             # Trigger callback (which calls DisplayManager.update_config which calls update_preferences)
             if self.on_save:
                 try: self.on_save()
-                except: pass
+                except Exception: pass
 
             self.root.destroy()
         except Exception as e:

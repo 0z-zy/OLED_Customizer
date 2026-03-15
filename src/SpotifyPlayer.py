@@ -40,7 +40,6 @@ class SpotifyPlayer:
         self.changed = False
         self.song_position = 0
         self.song_duration = 0
-        self.song_duration = 0
         self.previous_image = None
         self.source = "spotify"
 
@@ -168,7 +167,7 @@ class SpotifyPlayer:
             self.artist.left_align = False
             self.title.steps_calculated = False
             self.artist.steps_calculated = False
-        except:
+        except Exception:
             pass
         
         try:
@@ -186,7 +185,7 @@ class SpotifyPlayer:
             # Fallback to standard on any drawing error
             try:
                 self._draw_standard(draw, image)
-            except:
+            except Exception:
                 pass
 
         self.previous_image = image

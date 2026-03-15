@@ -190,7 +190,7 @@ class HardwareMonitor:
         if _wmi_available:
             try:
                 self._wmi = wmi.WMI(namespace="root/WMI")
-            except:
+            except Exception:
                 pass
 
     def update_preferences(self, preferences):
@@ -235,7 +235,7 @@ class HardwareMonitor:
                 c = (t.CurrentTemperature / 10.0) - 273.15
                 if c > 0:
                     return c
-        except:
+        except Exception:
             pass
         return None
 

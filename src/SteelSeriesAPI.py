@@ -133,7 +133,7 @@ class SteelSeriesAPI:
     def remove_game(self):
         try:
             self.send_data("/remove_game", {"game": GAME})
-        except:
+        except Exception:
             pass
 
     def register_game(self):

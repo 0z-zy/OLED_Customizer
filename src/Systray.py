@@ -62,7 +62,11 @@ def toggle_player(icon):
 
 
 def open_config(icon):
-    os.startfile(icon.manager.user_preferences.config_path)
+    config_path = icon.manager.user_preferences.config_path
+    if os.path.exists(config_path):
+        os.startfile(config_path)
+    else:
+        logger.warning("Config file not found: %s", config_path)
 
 
 def toggle_hw_monitor(icon):
@@ -301,9 +305,12 @@ def do_vacuum_databases(icon):
         logger.error("Close SteelSeries GG before compacting!")
         return
     
-    before, after = ProfileBackup.vacuum_databases()
-    saved = before - after
-    logger.info(f"Compacted databases: {before:.1f}MB -> {after:.1f}MB (saved {saved:.1f}MB)")
+    try:
+        before, after = ProfileBackup.vacuum_databases()
+        saved = before - after
+        logger.info(f"Compacted databases: {before:.1f}MB -> {after:.1f}MB (saved {saved:.1f}MB)")
+    except Exception as e:
+        logger.error(f"Failed to compact databases: {e}")
 
 def build_restore_menu():
     """Build dynamic restore submenu with available backups."""

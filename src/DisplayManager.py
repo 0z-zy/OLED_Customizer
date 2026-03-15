@@ -150,7 +150,7 @@ class DisplayManager:
             logger.info(f"Process Privilege Status: {'ADMIN/UAC' if is_admin else 'USER'}")
             if not is_admin:
                 logger.warning("App detected NOT running as Admin. Hotkeys may fail over elevated games (GTA V, etc.).")
-        except:
+        except Exception:
             pass
 
     # ------------------------------------------------------------------
@@ -525,13 +525,14 @@ class DisplayManager:
 
             # ---- Message pump (required to keep LL hook alive) ----
             msg = wintypes.MSG()
-            while user32.GetMessageW(byref(msg), None, 0, 0) != 0:
-                user32.TranslateMessage(byref(msg))
-                user32.DispatchMessageW(byref(msg))
-
-            user32.UnhookWindowsHookEx(k_hook)
-            user32.UnhookWindowsHookEx(m_hook)
-            logger.info("Hooks removed")
+            try:
+                while user32.GetMessageW(byref(msg), None, 0, 0) != 0:
+                    user32.TranslateMessage(byref(msg))
+                    user32.DispatchMessageW(byref(msg))
+            finally:
+                user32.UnhookWindowsHookEx(k_hook)
+                user32.UnhookWindowsHookEx(m_hook)
+                logger.info("Hooks removed")
 
         except Exception as e:
             # This thread is non-critical — never crash the app

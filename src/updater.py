@@ -154,7 +154,7 @@ def start_update_process():
             try:
                 if os.path.exists(old_exe) and not os.path.exists(current_exe):
                     os.rename(old_exe, current_exe)
-            except:
+            except Exception:
                 pass
             return False
             

@@ -28,7 +28,7 @@ class Timer:
                 # Fallback to default if custom font fails
                 try:
                     return ImageFont.load_default()
-                except:
+                except Exception:
                     # Absolute emergency fallback
                     return None
 

@@ -51,7 +51,7 @@ class VolumeOverlay:
                 device = AudioUtilities.GetMicrophone()
                 interface = device.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
                 self._mic_volume = interface.QueryInterface(IAudioEndpointVolume)
-            except:
+            except Exception:
                 pass
 
         # Load Icons (V4)
@@ -105,7 +105,7 @@ class VolumeOverlay:
             volume = cast(interface, POINTER(IAudioEndpointVolume))
             volume.SetMute(new_state, None)
             return True
-        except:
+        except Exception:
             return False
 
     def toggle_mic_mute(self):
@@ -113,7 +113,7 @@ class VolumeOverlay:
         import ctypes
         try:
             ctypes.windll.ole32.CoInitialize(None)
-        except:
+        except Exception:
             pass
 
         try:
@@ -130,7 +130,7 @@ class VolumeOverlay:
                     default_mic = AU.GetMicrophone(role)
                     if default_mic:
                         break
-                except:
+                except Exception:
                     continue
 
             # If we found a default, just toggle that lone one
@@ -144,7 +144,7 @@ class VolumeOverlay:
                     if time() - self.app_start_time > 4.0: self._last_change = time()
                     logger.info(f"Toggled Default Mic Mute to {new_state}")
                     return
-                except:
+                except Exception:
                     pass
 
             # --- PHASE 2: NUCLEAR OPTION (Search for ALL capture devices) ---
@@ -197,7 +197,7 @@ class VolumeOverlay:
                  if p.info['name'] and 'discord' in p.info['name'].lower():
                      running = True
                      break
-        except:
+        except Exception:
             pass
         
         if running != self._discord_running:
@@ -232,7 +232,7 @@ class VolumeOverlay:
                     device = AudioUtilities.GetSpeakers()
                     self._volume = device.EndpointVolume.QueryInterface(IAudioEndpointVolume)
                     logger.warning("Re-initialized speaker interface after failure")
-                except:
+                except Exception:
                     self._volume = None
                 
         # Check Mic
@@ -255,7 +255,7 @@ class VolumeOverlay:
                         interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
                         self._mic_volume = cast(interface, POINTER(IAudioEndpointVolume))
                         logger.warning("Re-initialized microphone interface after failure")
-                except:
+                except Exception:
                     self._mic_volume = None
         
         if changed:
