@@ -90,6 +90,10 @@ class DisplayManager:
         # so Windows never kills it (LL hooks die after ~300ms timeout).
         self._hotkey_action_queue = Queue(maxsize=32)
         Thread(target=self._hotkey_action_worker, daemon=True, name="Hotkey-Actions").start()
+        
+        # Track Thread ID of the hook loop so we can post a WM_QUIT to it
+        self._hook_thread_id = None
+        
         # Start the raw Windows keyboard hook thread
         Thread(target=self._keyboard_hook_loop, daemon=True, name="Keyboard-Hook").start()
 
@@ -260,6 +264,10 @@ class DisplayManager:
         try:
             import ctypes
             from ctypes import wintypes, POINTER, Structure, byref
+
+            # Register the thread ID. This allows `shutdown()` to post a WM_QUIT
+            # message directly to this thread, breaking the GetMessageW loop cleanly.
+            self._hook_thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
 
             # Use WinDLL with use_last_error for proper error reporting
             user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -972,6 +980,16 @@ class DisplayManager:
         """Gracefully stop all background threads and clean up resources."""
         logger.info("Shutting down DisplayManager...")
         self._running = False
+
+        # Properly unhook the raw windows keyboard hook by sending WM_QUIT
+        if self._hook_thread_id:
+            try:
+                import ctypes
+                # PostThreadMessageW: idThread, Msg (0x0012 = WM_QUIT), wParam, lParam
+                ctypes.windll.user32.PostThreadMessageW(self._hook_thread_id, 0x0012, 0, 0)
+                logger.info(f"Sent WM_QUIT to hook thread ID {self._hook_thread_id}")
+            except Exception as e:
+                logger.error(f"Failed to post quit message to hook thread: {e}")
 
         # Drain queues so threads waiting on .get() can exit
         for q in (self._hotkey_action_queue, self._spotify_queue):
