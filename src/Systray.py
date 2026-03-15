@@ -63,10 +63,10 @@ def toggle_player(icon):
 
 def open_config(icon):
     config_path = icon.manager.user_preferences.config_path
-    if os.path.exists(config_path):
-        os.startfile(config_path)
-    else:
-        logger.warning("Config file not found: %s", config_path)
+    if not os.path.exists(config_path):
+        logger.info("Config file not found, creating with defaults: %s", config_path)
+        icon.manager.user_preferences.save_preferences()
+    os.startfile(config_path)
 
 
 def toggle_hw_monitor(icon):
