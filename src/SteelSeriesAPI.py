@@ -182,21 +182,12 @@ class SteelSeriesAPI:
                     self._consecutive_errors += 1
                 else:
                     self._consecutive_errors = 0
-                    self._frames_sent += 1
                 
                 # IMPORTANT: In urllib3, you must ensure the response data is read 
                 # (already done by .data) so the connection can be returned to the pool.
-                # BaseHTTPResponse doesn't have a .close() like requests, it happens automatically.
-                
             except Exception as e:
                 self._consecutive_errors += 1
                 # logger.debug("SteelSeries API Transport Error: %s", e)
-
-            # Periodic manual GC collection to help high-frequency loops stay clean.
-            # Only do generation 1 collection to avoid blocking the main thread for too long.
-            if self._frames_sent >= 100:
-                self._frames_sent = 0
-                gc.collect(1)
 
         # If we hit error threshold, start back-off
         if self._consecutive_errors >= 5:

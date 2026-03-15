@@ -318,13 +318,26 @@ def do_vacuum_databases(icon):
     except Exception as e:
         logger.error(f"Failed to compact databases: {e}")
 
+import time
+
 def build_restore_menu():
-    """Build dynamic restore submenu with available backups."""
+    """Build dynamic restore submenu with available backups. Cached for 1s to prevent log spam."""
+    if not hasattr(build_restore_menu, "_cache"):
+        build_restore_menu._cache = (0, [])
+    
+    now = time.time()
+    last_time, last_items = build_restore_menu._cache
+    
+    if now - last_time < 1.0:
+        return last_items
+
     logger.debug("Building restore menu...")
     backups = ProfileBackup.list_backups()
     logger.debug(f"Found {len(backups)} backups")
     if not backups:
-        return [Item("No backups available", None, enabled=False)]
+        items = [Item("No backups available", None, enabled=False)]
+        build_restore_menu._cache = (now, items)
+        return items
     
     items = []
     for name, path, count, mtime in backups[:10]:  # Limit to 10
@@ -334,14 +347,18 @@ def build_restore_menu():
             display_name = "🛡️ Safety: " + name.replace("pre_restore_", "")
         
         label = f"{display_name} ({count} files)"
-        # logger.debug(f"Adding restore option: {label} -> {path}")
+        
         # Create a closure to capture path correctly
         def make_restore_action(backup_path):
             def action(icon, item):
                 logger.info(f"Restore action triggered for: {backup_path}")
+                from threading import Thread
                 Thread(target=do_restore_profiles, args=(icon, backup_path), daemon=True).start()
             return action
+            
         items.append(Item(label, make_restore_action(path)))
+    
+    build_restore_menu._cache = (now, items)
     return items
 
 def run_systray_async(display_manager):
