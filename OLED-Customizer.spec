@@ -63,7 +63,9 @@ def collect_pkg(name):
 # List of problematic packages to collect all data/submodules for
 problem_pkgs = [
     'pycaw', 'comtypes', 'OpenSSL', 'cryptography', 
-    'pynput', 'winrt', 'winrt.windows.foundation', 'winrt.windows.media.control',
+    'pynput', 'winrt', 'winrt.windows.foundation', 
+    'winrt.windows.foundation.collections', 'winrt.windows.storage',
+    'winrt.windows.media.control',
     'wmi', 'pythonnet', 'psutil',
     'HardwareMonitor'
 ]
