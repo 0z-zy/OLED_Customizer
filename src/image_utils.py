@@ -44,14 +44,20 @@ def convert_color(o):
 
 
 def convert_to_bitmap(image_data):
+    """
+    Faster conversion from PIL image data to SteelSeries binary bitmap.
+    PIL "1" mode image.getdata() returns 0 or 255.
+    """
     res = bytearray()
+    # Process 8 pixels at a time into one byte
     for i in range(0, len(image_data), 8):
         byte = 0
-        for j in range(7, -1, -1):
-            byte += convert_color(image_data[i + j]) << (7 - j)
+        for j in range(8):
+            if image_data[i + j] > 0:
+                # SteelSeries format: MSB is the leftmost pixel in the 8-pixel block
+                byte |= (1 << (7 - j))
         res.append(byte)
-
-    return bytes(res)  # Immutable bytes = faster comparison, less GC pressure
+    return bytes(res)
 
 
 def draw_spotify(image, position):

@@ -40,7 +40,7 @@ class SpotifyAPI:
         # urllib3 PoolManager for lean HTTP calls
         self._http = urllib3.PoolManager(
             headers={"Connection": "keep-alive"},
-            timeout=urllib3.Timeout(connect=1.0, read=5.0),
+            timeout=urllib3.Timeout(connect=1.0, read=2.0),
             retries=urllib3.Retry(total=3, backoff_factor=1)
         )
         self._auth_lock = __import__('threading').Lock()

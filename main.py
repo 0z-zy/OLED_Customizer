@@ -139,6 +139,14 @@ if __name__ == "__main__":
         setup_logging(debug=debug_on)
         logger = logging.getLogger("OLED Customizer")
         
+        # V5: Initialize COM on main thread for stability
+        try:
+            import ctypes
+            ctypes.windll.ole32.CoInitialize(0)
+            logger.debug("COM initialized on main thread.")
+        except Exception as e:
+            logger.warning(f"Main thread COM init failed: {e}")
+        
         # Create app data directory if it doesn't exist (redundant but safe)
         app_data_path = fetch_app_data_path()
         if not path.exists(app_data_path):

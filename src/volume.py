@@ -61,12 +61,10 @@ class VolumeOverlay:
                 logger.warning("No microphone found")
         except Exception as e:
             logger.warning(f"Microphone init failed: {e}")
-            try:
-                device = AudioUtilities.GetMicrophone()
-                interface = device.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                self._mic_volume = interface.QueryInterface(IAudioEndpointVolume)
-            except Exception:
-                pass
+        finally:
+            # Note: self._mic_volume holds the persistent reference if success.
+            # We don't want to CoUninitialize here if it might break the persistent comtypes objects.
+            pass
 
     def _silent_init(self):
         """Fetch initial state without triggering the overlay."""
@@ -110,6 +108,14 @@ class VolumeOverlay:
             return True
         except Exception:
             return False
+        finally:
+            if 'interface' in locals() and interface:
+                try:
+                    import ctypes
+                    # We don't CoUninitialize here as it might be called from within a loop
+                    pass
+                except:
+                    pass
 
     def toggle_mic_mute(self):
         """Toggle mic mute state - Nuclear Option: Mutes ALL active capture devices if no default found."""

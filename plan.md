@@ -2,6 +2,43 @@
 
 ---
 
+## Plan: Fix OLED Display Disappearing (Auto-Recovery)
+
+**Date:** 2026-03-16 06:08
+
+### Problem
+The OLED screen goes blank after a while — no crash, no error in debug.log. Root cause: SteelSeries GG deregisters the game after 60s without events. When API errors pile up (GG restart, port change, sleep/wake), the app backs off but never re-registers. All frame errors were silently swallowed (`except: pass`).
+
+### Solution
+1. **SteelSeriesAPI.py — Auto-recovery**: After 10 consecutive errors, automatically call `reset()` to re-read the port and re-register the game.
+2. **SteelSeriesAPI.py — Escalating backoff**: 2s → 5s → 10s instead of flat 2s.
+3. **SteelSeriesAPI.py — Log transport errors**: Transport errors logged at DEBUG level (were fully silent before).
+4. **DisplayManager.py — Frame failure logging & recovery**: Frame send errors now logged. If frames fail for 30s+, forces a full `steelseries_api.reset()`.
+
+### Files Changed
+- `src/SteelSeriesAPI.py`
+- `src/DisplayManager.py`
+
+---
+
+## Plan: Fix "Access Violation" Crash & Harden Stability
+
+**Date:** 2026-03-15 23:30
+
+### Problem
+The application crashed with a `Windows fatal exception: access violation` after running for about 50 minutes. This is a "hard crash" usually caused by memory corruption. Analysis of the logs and code points to three potential culprits:
+1. **Thread-safety:** `SpotifyPlayer` and other state objects are accessed from both the main thread and the new Spotify worker thread without a lock.
+2. **COM Leaks:** `VolumeOverlay` might be leaking COM interfaces when re-initializing the microphone.
+3. **Memory Pressure:** High-frequency HTTP calls to SteelSeries GG combined with COM/WinRT/pythonnet can lead to heap fragmentation or GC issues.
+
+### Solution
+1. **Thread-safety:** Add a threading lock to `DisplayManager` to protect shared state (`self.player`, etc.).
+2. **Fix COM Leaks:** Ensure COM interfaces are explicitly released when `VolumeOverlay` re-initializes or fails.
+3. **Harden SteelSeriesAPI:** Optimize header creation and error handling to reduce object churn.
+4. **Maintenance:** Add a manual `gc.collect()` every 30 seconds to keep the memory clean and stable.
+
+---
+
 ## Plan: Fix Missing WinRT Collections & Storage (Root Cause Found)
 
 **Date:** 2026-03-15 20:45

@@ -69,6 +69,9 @@ class DisplayManager:
             self.spotify_api = None
         
         self.steelseries_api = SteelSeriesAPI()
+        
+        # Lock for thread-safety across shared state like self.player
+        self._lock = __import__('threading').Lock()
 
         self.volume_overlay = VolumeOverlay(config)
         self.hardware_monitor = HardwareMonitor(config, self.user_preferences)
@@ -141,6 +144,7 @@ class DisplayManager:
         self._last_launch_attempt = 0
         self._last_frame_sent_time = 0
         self._last_heartbeat_time = 0  # Heartbeat to keep game registered
+        self._frame_fail_start = 0     # Tracks when frame sends started failing
 
         # Spotify worker thread (single persistent thread instead of spawning new ones)
         self._spotify_queue = Queue(maxsize=1)
@@ -752,7 +756,12 @@ class DisplayManager:
                                  ((now_ms - self._spotify_last_playing_ms) <= self._spotify_hold_playing_ms)
                 
                 if not spotify_active:
-                    self._apply_to_player(self.player, payload, now_ms, source=payload.get("source", "youtube"))
+                    # V5: Standardize lock with timeout
+                    if self._lock.acquire(timeout=0.1):
+                        try:
+                            self._apply_to_player(self.player, payload, now_ms, source=payload.get("source", "youtube"))
+                        finally:
+                            self._lock.release()
 
             # 2) Spotify poll (normal) - only if Spotify is enabled
             if self.spotify_api and now_ms - self._last_spotify_poll_ms >= self._spotify_poll_ms:
@@ -801,8 +810,17 @@ class DisplayManager:
                     img = self.timer.get_image()
                     frame_data = convert_to_bitmap(img.getdata())
                 elif self.state == State.SHOW_PLAYER and self.display_player:
-                    img = self.player.next_step()
-                    frame_data = convert_to_bitmap(img.getdata())
+                    # Use lock with timeout to prevent deadlock hangs
+                    if self._lock.acquire(timeout=0.1):
+                        try:
+                            img = self.player.next_step()
+                        finally:
+                            self._lock.release()
+                    else:
+                        img = None
+                        
+                    if img:
+                        frame_data = convert_to_bitmap(img.getdata())
 
                     # paused threshold (Yedek kontrol, yukarıdaki mantık bunu zaten çözüyor ama kalsın)
                     if self.player.pause_started and (int(time() * 1000) - self.player.pause_started) > self.timer_threshold:
@@ -816,14 +834,29 @@ class DisplayManager:
                         self.steelseries_api.send_frame(frame_data)
                         self._last_sent_frame = frame_data
                         self._last_frame_sent_time = now_sec
-                    except Exception:
-                        pass
+                        self._frame_fail_start = 0  # Reset failure timer on success
+                    except Exception as e:
+                        logger.debug("Frame send failed: %s", e)
+                        # Track prolonged failure — if frames fail for 30s+, force re-register
+                        if self._frame_fail_start == 0:
+                            self._frame_fail_start = now_sec
+                        elif (now_sec - self._frame_fail_start) > 30.0:
+                            logger.warning("Frames failing for 30s+, forcing SteelSeries re-registration...")
+                            self._frame_fail_start = 0
+                            try:
+                                self.steelseries_api.reset()
+                            except Exception as re:
+                                logger.error("Re-registration failed: %s", re)
 
-            # Heartbeat: keep the game registered with SteelSeries GG (every 30s)
+            # Heartbeat & GC: keep the game registered (every 30s) and clean up memory
             if now_sec - self._last_heartbeat_time > 30.0:
                 self._last_heartbeat_time = now_sec
                 try:
                     self.steelseries_api.heartbeat()
+                    # Perform manual GC to prevent heap fragmentation / access violations
+                    # especially after long runtimes with multiple C extensions (COM/WinRT)
+                    import gc
+                    gc.collect()
                 except Exception:
                     pass
 
@@ -834,15 +867,20 @@ class DisplayManager:
         while self._running:
             try:
                 spotify_api = self._spotify_queue.get(timeout=2.0)
-                self._poll_spotify(spotify_api)
+                # V6: Move network call OUTSIDE the lock to prevent app-wide freezes
+                song_data = spotify_api.fetch_song()
+                if self._lock.acquire(timeout=0.1):
+                    try:
+                        self._poll_spotify(song_data)
+                    finally:
+                        self._lock.release()
             except Empty:
                 continue  # No work, loop back
             except Exception:
                 pass
 
-    def _poll_spotify(self, spotify_api):
+    def _poll_spotify(self, song_data):
         try:
-            song_data = spotify_api.fetch_song()
             if not song_data:
                 return
 
@@ -1044,8 +1082,12 @@ class DisplayManager:
             while self._running:
                 try:
                     data = await self.windows_media.get_media_info()
-                    with self._smtc_lock:
-                        self._smtc_data = data
+                    # V5: Lock timeout for SMTC background thread
+                    if self._smtc_lock.acquire(timeout=0.1):
+                        try:
+                            self._smtc_data = data
+                        finally:
+                            self._smtc_lock.release()
                     
                     # Log occasionally if media found
                     # if data and data.get("title"):

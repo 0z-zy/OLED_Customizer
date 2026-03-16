@@ -144,8 +144,17 @@ class WindowsMedia:
                 return {}
 
             # Now proceed with current_session...
-            
-            info = await current_session.try_get_media_properties_async()
+            try:
+                info = await asyncio.wait_for(
+                    current_session.try_get_media_properties_async(),
+                    timeout=2.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning("SMTC media properties request TIMED OUT")
+                info = None
+            except (OSError, RuntimeError):
+                info = None
+                
             if not info:
                 return {}
 

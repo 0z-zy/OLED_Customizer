@@ -298,6 +298,7 @@ class SettingsGUI:
         self.vars["hw_polling_interval"] = tk.StringVar(value=str(self.prefs.get_preference("hw_polling_interval") or "1000"))
         self.vars["show_game_fps"] = tk.BooleanVar(value=bool(self.prefs.get_preference("show_game_fps")))
         self.vars["selected_gpu"] = tk.StringVar(value=self.prefs.get_preference("selected_gpu") or "Auto")
+        self.vars["spotify_fetch_delay"] = tk.StringVar(value=str(self.prefs.get_preference("spotify_fetch_delay") or "2"))
 
     def _create_pages(self):
         # -- GENERAL PAGE --
@@ -362,6 +363,11 @@ class SettingsGUI:
         self._entry_row(p_spotify, "Spotify Client Secret", self.vars["spotify_client_secret"], width=25, show="*")
         self._entry_row(p_spotify, "Redirect URI", self.vars["spotify_redirect_uri"], width=25)
         self._entry_row(p_spotify, "Connection Port", self.vars["local_port"])
+        
+        spotify_poll_options = {"1s (Fast)": "1", "2s (Default)": "2", "3s": "3", "5s": "5", "10s (Slow)": "10"}
+        self._dropdown_row(p_spotify, "Spotify Polling Rate", self.vars["spotify_fetch_delay"], 
+                          list(spotify_poll_options.keys()), 
+                          display_to_val=spotify_poll_options)
         
         # Add a help label
         help_frame = tk.Frame(p_spotify, bg=Colors.CONTENT)
@@ -668,7 +674,7 @@ class SettingsGUI:
         try:
             for k, v in self.vars.items():
                 val = v.get()
-                if k in ["scrollbar_padding", "text_padding_left", "local_port"]:
+                if k in ["scrollbar_padding", "text_padding_left", "local_port", "spotify_fetch_delay"]:
                     try: val = int(val)
                     except Exception: val = 0
                 elif k == "date_format":
@@ -844,7 +850,7 @@ class SettingsGUI:
                 val = v.get()
                 logger.info(f"Saving {k}: {val}")
                 
-                if k in ["scrollbar_padding", "text_padding_left", "local_port"]:
+                if k in ["scrollbar_padding", "text_padding_left", "local_port", "spotify_fetch_delay"]:
                     try: val = int(val)
                     except Exception: val = 0
                     self.prefs.preferences[k] = val

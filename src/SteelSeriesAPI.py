@@ -28,7 +28,7 @@ class SteelSeriesAPI:
         self._http = urllib3.PoolManager(
             num_pools=1,
             headers={"Content-Type": "application/json", "Connection": "keep-alive"},
-            timeout=urllib3.Timeout(connect=0.1, read=0.5),
+            timeout=urllib3.Timeout(connect=0.5, read=1.0),
             retries=False
         )
         
@@ -36,16 +36,32 @@ class SteelSeriesAPI:
         import threading
         self._send_lock = threading.Lock()
         
-        # Error back-off
+        # Error back-off (escalating: 2s → 5s → 10s)
         self._consecutive_errors = 0
         self._backoff_until = 0
+        self._backoff_level = 0          # 0=2s, 1=5s, 2=10s
+        self._BACKOFF_DURATIONS = [2.0, 5.0, 10.0]
+        self._RESET_THRESHOLD = 10       # Force re-register after this many consecutive errors
+        self._is_resetting = False      # Prevent overlapping resets
+        
+        # Pre-allocate static headers to reduce object churn
+        self._static_headers = {
+            "Content-Type": "application/json",
+            "Connection": "keep-alive"
+        }
         
         # Frame counter for periodic manual GC collection
         self._frames_sent = 0
         
         self.retrieve_address()
 
-    def retrieve_address(self):
+    def retrieve_address(self, retries=None):
+        """
+        Locate coreProps.json and register with the GameSense API.
+        If retries is None, loops forever (used for startup).
+        Otherwise attempts specified number of retries before giving up.
+        """
+        attempt = 0
         while True:
             try:
                 coreprops = None
@@ -69,14 +85,26 @@ class SteelSeriesAPI:
                 logger.info("Found local address API : %s", self.address)
                 return self.address
             except Exception as e:
+                attempt += 1
+                if retries is not None and attempt >= retries:
+                    logger.error("Failed to connect/register to SteelSeries GameSense API after %d attempts: %s", attempt, e)
+                    return None
+                    
                 logger.error("Could not connect/register to SteelSeries GameSense API (%s). Retry in 5s...", e)
                 sleep(5)
 
     def reset(self):
         """Invalidate current connection and force re-registration."""
-        logger.info("Resetting SteelSeries connection...")
-        self.address = ""
-        self.retrieve_address()
+        if self._is_resetting:
+            return
+        self._is_resetting = True
+        try:
+            logger.info("Resetting SteelSeries connection...")
+            self.address = ""
+            # Limit retries during resets to avoid blocking the main thread forever
+            self.retrieve_address(retries=2)
+        finally:
+            self._is_resetting = False
 
     def bind_game_event(self):
         # Apex 7 Pro OLED = 128x40 (640 byte)
@@ -158,38 +186,59 @@ class SteelSeriesAPI:
             if now < self._backoff_until:
                 return
             else:
-                logger.info("Back-off expired, resuming API calls...")
-                self._consecutive_errors = 0
+                # Proceed but DON'T reset error counter yet — wait for success
+                if now - self._backoff_until > 0.1: # Only log once per backoff
+                   logger.debug("Back-off expired, testing SteelSeries API connection...")
 
         # Minimize object creation: encode JSON once outside the loop
         body = dumps(data).encode('utf-8')
         url = self.address + endpoint
 
-        with self._send_lock:
+        if self._send_lock.acquire(timeout=0.5):
             try:
+                headers = self._static_headers.copy()
+                headers["Content-Length"] = str(len(body))
+                
                 response = self._http.request(
                     "POST",
                     url,
                     body=body,
-                    headers={
-                        "Content-Length": str(len(body)),
-                        "Content-Type": "application/json"
-                    }
+                    headers=headers
                 )
                 
-                if response.status != 200:
+                if response.status == 200:
+                    self._consecutive_errors = 0
+                    self._backoff_level = 0
+                else:
                     logger.debug("SteelSeries API error %d: %s", response.status, response.data.decode('utf-8', 'ignore'))
                     self._consecutive_errors += 1
-                else:
-                    self._consecutive_errors = 0
                 
                 # IMPORTANT: In urllib3, you must ensure the response data is read 
                 # (already done by .data) so the connection can be returned to the pool.
             except Exception as e:
                 self._consecutive_errors += 1
-                # logger.debug("SteelSeries API Transport Error: %s", e)
+                logger.debug("SteelSeries API transport error: %s", e)
+            finally:
+                self._send_lock.release()
+        else:
+            logger.warning("SteelSeries API send lock TIMEOUT (0.5s)")
 
-        # If we hit error threshold, start back-off
-        if self._consecutive_errors >= 5:
-            self._backoff_until = time() + 2.0
-            logger.warning("Too many API errors (%d), backing off for 2s", self._consecutive_errors)
+        # Auto-recovery: if errors are persistent, force a full re-registration
+        if self._consecutive_errors >= self._RESET_THRESHOLD:
+            logger.warning("Persistent API errors (%d), forcing re-registration...", self._consecutive_errors)
+            # Reset counter so we don't loop reset() if it fails internally
+            self._consecutive_errors = 0
+            self._backoff_level = 0
+            try:
+                self.reset()
+            except Exception as e:
+                logger.error("Auto-reset failed: %s", e)
+        # Standard backoff with escalation
+        elif self._consecutive_errors >= 5:
+            # Clamp level
+            idx = min(self._backoff_level, len(self._BACKOFF_DURATIONS) - 1)
+            duration = self._BACKOFF_DURATIONS[idx]
+            self._backoff_until = time() + duration
+            # Increment level for next time (escalation)
+            self._backoff_level += 1
+            logger.warning("Too many API errors (%d), backing off for %.0fs", self._consecutive_errors, duration)
