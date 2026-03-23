@@ -206,15 +206,16 @@ class SteelSeriesAPI:
                     headers=headers
                 )
                 
+                # IMPORTANT: In urllib3, you must read the response data to 
+                # release the connection back to the pool.
+                resp_data = response.data
+                
                 if response.status == 200:
                     self._consecutive_errors = 0
                     self._backoff_level = 0
                 else:
-                    logger.debug("SteelSeries API error %d: %s", response.status, response.data.decode('utf-8', 'ignore'))
+                    logger.debug("SteelSeries API error %d: %s", response.status, resp_data.decode('utf-8', 'ignore'))
                     self._consecutive_errors += 1
-                
-                # IMPORTANT: In urllib3, you must ensure the response data is read 
-                # (already done by .data) so the connection can be returned to the pool.
             except Exception as e:
                 self._consecutive_errors += 1
                 logger.debug("SteelSeries API transport error: %s", e)

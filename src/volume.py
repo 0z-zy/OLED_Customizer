@@ -130,7 +130,8 @@ class VolumeOverlay:
             from pycaw.pycaw import IAudioEndpointVolume
             from comtypes import CLSCTX_ALL, GUID
             
-            # --- PHASE 1: Try Standard Roles (Headsets/Comms) ---
+        try:
+            # --- PHASE 1: Try Standard Roles ---
             target_roles = [ERole.eCommunications.value, ERole.eMultimedia.value]
             default_mic = None
             
@@ -142,7 +143,6 @@ class VolumeOverlay:
                 except Exception:
                     continue
 
-            # If we found a default, just toggle that lone one
             if default_mic:
                 try:
                     interface = default_mic.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
@@ -156,26 +156,22 @@ class VolumeOverlay:
                 except Exception:
                     pass
 
-            # --- PHASE 2: NUCLEAR OPTION (Search for ALL capture devices) ---
-            # If default wasn't found or activation failed, mute EVERYTHING ACTIVE.
+            # --- PHASE 2: NUCLEAR OPTION ---
             try:
                 from pycaw.pycaw import IMMDeviceEnumerator, EDataFlow
                 import comtypes
                 clsid = GUID("{BCDE0395-E52F-467C-8E3D-C4579291692E}")
                 enumerator = comtypes.CoCreateInstance(clsid, interface=IMMDeviceEnumerator, clsctx=CLSCTX_ALL)
-                collection = enumerator.EnumAudioEndpoints(EDataFlow.eCapture.value, 0x1) # DEVICE_STATE_ACTIVE
+                collection = enumerator.EnumAudioEndpoints(EDataFlow.eCapture.value, 0x1) 
                 
                 count = collection.GetCount()
                 if count > 0:
-                    # Use a stable toggle target based on our internal state if possible
                     target_mute_state = not (self._last_mic_mute if self._last_mic_mute is not None else False)
                     success_count = 0
-                    
                     for i in range(count):
                         dev = collection.Item(i)
                         if self._set_mic_mute_on_device(dev, target_mute_state):
                             success_count += 1
-                            logger.debug(f"Nuclear Mute: Toggled device {dev.GetId()}")
                     
                     if success_count > 0:
                         self._last_mic_mute = target_mute_state
@@ -185,9 +181,15 @@ class VolumeOverlay:
             except Exception as e:
                 logger.debug(f"Nuclear search failed: {e}")
 
-            logger.warning("No microphone device found in any role or deep search during toggle")
+            logger.warning("No microphone device found during toggle")
         except Exception as e:
             logger.warning(f"System mic control failed: {e}")
+        finally:
+            # CRITICAL: Always uninitialize COM to prevent handle leaks over long runtimes
+            try:
+                ctypes.windll.ole32.CoUninitialize()
+            except Exception:
+                pass
 
         # Fallback: Overlay Only
         if self._last_mic_mute is None: self._last_mic_mute = False

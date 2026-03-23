@@ -80,6 +80,10 @@ def setup_logging(debug=False):
         logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
         logging.getLogger("requests").setLevel(logging.WARNING)
         
+        # comtypes logs every AddRef/Release pointer which floods logs when rendering
+        logging.getLogger("comtypes").setLevel(logging.WARNING)
+        logging.getLogger("pycaw").setLevel(logging.WARNING)
+        
         # Also silence charset_normalizer and other noisy libs
         logging.getLogger("charset_normalizer").setLevel(logging.WARNING)
         logging.getLogger("PIL").setLevel(logging.WARNING)

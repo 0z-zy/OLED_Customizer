@@ -64,7 +64,7 @@ class _LHMWorker:
         Thread(target=self._worker_loop, daemon=True, name="LHM-Worker").start()
         
     def _worker_loop(self):
-        """Runs in dedicated thread - owns all COM objects."""
+        """Runs in dedicated thread - owns all COM objects and performs all system polling."""
         try:
             # Initialize COM for this thread
             import ctypes
@@ -80,57 +80,97 @@ class _LHMWorker:
             self._computer.Open()
             logger.info("LHM Worker: Hardware monitoring initialized")
         except Exception as e:
-            logger.error(f"LHM Worker: Failed to init: {e}")
-            self._running = False
-            return
+            logger.warning(f"LHM Worker: LHM sensors not available (not Admin?): {e}")
             
-        # Main update loop - update sensors every 500ms
+        import psutil
+        import wmi
+        _wmi_handle = None
+        try:
+            _wmi_handle = wmi.WMI(namespace="root/WMI")
+        except Exception:
+            pass
+
+        last_wmi_poll = 0
+        wmi_temp_cache = None
+
+        # Main update loop
         while self._running:
             try:
                 new_cache = {}
+                now = time()
+
+                # 1. Update LHM Sensors (if available)
+                if self._computer:
+                    try:
+                        for hw in self._computer.Hardware:
+                            hw_type = str(hw.HardwareType).lower()
+                            hw_name = str(hw.Name)
+                            hw.Update()
+                            for sensor in hw.Sensors:
+                                if sensor.Value is not None:
+                                    key = (hw_type, hw_name, str(sensor.SensorType).lower(), str(sensor.Name).lower())
+                                    new_cache[key] = float(sensor.Value)
+                            for sub in hw.SubHardware:
+                                sub.Update()
+                                for sensor in sub.Sensors:
+                                    if sensor.Value is not None:
+                                        key = (hw_type, hw_name, str(sensor.SensorType).lower(), str(sensor.Name).lower())
+                                        new_cache[key] = float(sensor.Value)
+                    except Exception as e:
+                        logger.debug(f"LHM poll error: {e}")
+
+                # 2. Update psutil Sensors (CPU Usage, RAM)
+                new_cache[('cpu', 'auto', 'load', 'total')] = psutil.cpu_percent(interval=None)
+                mem = psutil.virtual_memory()
+                new_cache[('ram', 'auto', 'load', 'percent')] = mem.percent
+                new_cache[('ram', 'auto', 'data', 'used_gb')] = mem.used / (1024**3)
+                new_cache[('ram', 'auto', 'data', 'total_gb')] = mem.total / (1024**3)
+
+                # 3. Update WMI Sensors (Fallback CPU Temp - Cache for 2 seconds to avoid leak/lag)
+                if _wmi_handle and now - last_wmi_poll > 2.0:
+                    try:
+                        last_wmi_poll = now
+                        temps = _wmi_handle.MSAcpi_ThermalZoneTemperature()
+                        for t in temps:
+                            c = (t.CurrentTemperature / 10.0) - 273.15
+                            if c > 0:
+                                wmi_temp_cache = c
+                                break
+                    except Exception:
+                        pass
                 
-                for hw in self._computer.Hardware:
-                    hw_type = str(hw.HardwareType).lower()
-                    hw_name = str(hw.Name)
-                    hw.Update()
-                    
-                    # logger.debug(f"LHM: Processing HW: {hw_name} ({hw_type})")
-                    
-                    for sensor in hw.Sensors:
-                        if sensor.Value is not None:
-                            # Use tuple key: (hw_type, hw_name, sensor_type, sensor_name)
-                            key = (hw_type, hw_name, str(sensor.SensorType).lower(), str(sensor.Name).lower())
-                            new_cache[key] = float(sensor.Value)
-                            
-                    # SubHardware (some GPUs)
-                    for sub in hw.SubHardware:
-                        sub.Update()
-                        for sensor in sub.Sensors:
-                            if sensor.Value is not None:
-                                key = (hw_type, hw_name, str(sensor.SensorType).lower(), str(sensor.Name).lower())
-                                new_cache[key] = float(sensor.Value)
-                
+                if wmi_temp_cache is not None:
+                    new_cache[('cpu', 'auto', 'temperature', 'fallback')] = wmi_temp_cache
+
                 with self._cache_lock:
                     self._cache = new_cache
                     
             except Exception as e:
-                logger.debug(f"LHM Worker update error: {e}")
+                logger.debug(f"LHM Worker loop error: {e}")
                 
-            sleep(self._polling_interval / 1000.0)  # Dynamic interval
+            sleep(max(0.2, self._polling_interval / 1000.0))
             
     def get_sensor(self, hw_type, sensor_type, name_contains=None, hw_name=None):
         """Thread-safe read from cache."""
         with self._cache_lock:
+            # Priority 1: Exact matches
             for (hw, hn, st, name), value in self._cache.items():
-                if hw_type.lower() not in hw:
-                    continue
-                if hw_name and hw_name.lower() != "auto" and hw_name.lower() not in hn.lower():
-                    continue
-                if sensor_type.lower() not in st:
-                    continue
-                if name_contains and name_contains.lower() not in name:
-                    continue
+                if hw_type.lower() not in hw: continue
+                if hw_name and hw_name.lower() != "auto" and hw_name.lower() not in hn.lower(): continue
+                if sensor_type.lower() not in st: continue
+                if name_contains and name_contains.lower() not in name: continue
                 return value
+            
+            # Priority 2: Fallbacks (e.g. WMI temp if LHM temp missing)
+            if hw_type.lower() == "cpu" and sensor_type.lower() == "temperature":
+                return self._cache.get(('cpu', 'auto', 'temperature', 'fallback'))
+            if hw_type.lower() == "cpu" and sensor_type.lower() == "load":
+                return self._cache.get(('cpu', 'auto', 'load', 'total'))
+            if hw_type.lower() == "ram":
+                if sensor_type.lower() == "load": return self._cache.get(('ram', 'auto', 'load', 'percent'))
+                if name_contains == "used": return self._cache.get(('ram', 'auto', 'data', 'used_gb'))
+                if name_contains == "total": return self._cache.get(('ram', 'auto', 'data', 'total_gb'))
+                
         return None
 
     def get_available_gpus(self):
@@ -159,6 +199,7 @@ _lhm_worker = _LHMWorker()
 class HardwareMonitor:
     """
     Hardware monitor overlay for OLED display.
+    Only gather data once in the background. get_image just reads the cache.
     """
     
     def __init__(self, config, preferences, timeout=3.0):
@@ -167,38 +208,25 @@ class HardwareMonitor:
         self.timeout = timeout
         self._last_trigger = 0.0
         
-        # Instance-level font (not shared across threads)
         self.FONT = ImageFont.truetype(
             font=fetch_content_path("fonts/VerdanaBold.ttf"),
             size=11,
         )
         
-        # Load icons
         self.cpu_icon = self._load_icon("cpu_icon.png")
         self.gpu_icon = self._load_icon("gpu_icon.png")
         self.ram_icon = self._load_icon("ram_icon.png")
         
-        # Start the LHM worker (idempotent)
         interval = preferences.get_preference("hw_polling_interval") or 1000
         _lhm_worker.start(interval)
         
-        # FPS Monitor
         self.fps_monitor = FPSMonitor()
         self.show_fps = bool(preferences.get_preference("show_game_fps"))
-        
-        self._wmi = None
-        if _wmi_available:
-            try:
-                self._wmi = wmi.WMI(namespace="root/WMI")
-            except Exception:
-                pass
 
     def update_preferences(self, preferences):
-        """Update settings dynamically."""
         self.show_fps = bool(preferences.get_preference("show_game_fps"))
         interval = preferences.get_preference("hw_polling_interval") or 1000
         _lhm_worker._polling_interval = interval
-        # If worker is not running, start it
         if not _lhm_worker._running:
             _lhm_worker.start(interval)
 
@@ -218,34 +246,16 @@ class HardwareMonitor:
         return (time() - self._last_trigger) < self.timeout
 
     def _get_lhm_sensor(self, hw_type, sensor_type, name_contains=None):
-        """Get value from LHM worker cache (thread-safe)."""
         selected_gpu = self.preferences.get_preference("selected_gpu") or "Auto"
         return _lhm_worker.get_sensor(hw_type, sensor_type, name_contains, hw_name=selected_gpu if hw_type.lower() == "gpu" else None)
 
     def get_available_gpus(self):
         return _lhm_worker.get_available_gpus()
 
-    def _get_wmi_cpu_temp(self):
-        """Fallback CPU temp from WMI."""
-        if not self._wmi:
-            return None
-        try:
-            temps = self._wmi.MSAcpi_ThermalZoneTemperature()
-            for t in temps:
-                c = (t.CurrentTemperature / 10.0) - 273.15
-                if c > 0:
-                    return c
-        except Exception:
-            pass
-        return None
-
     def stop(self):
-        """Stop all background workers to release file handles to PyInstaller MEIPASS."""
         try:
             self.fps_monitor.stop()
             _lhm_worker.stop()
-            if self._wmi:
-                self._wmi = None
         except Exception:
             pass
 
@@ -254,97 +264,61 @@ class HardwareMonitor:
         image = Image.new("1", (w, h), color=self.config.secondary)
         draw = ImageDraw.Draw(image)
 
-        # --- Data Gathering ---
-        # 1. CPU
+        # --- Data Gathering (Cache-Only (V7)) ---
         cpu_temp = self._get_lhm_sensor("Cpu", "Temperature", "Tctl")
-        if not cpu_temp:
-            cpu_temp = self._get_lhm_sensor("Cpu", "Temperature", "Package")
-        if not cpu_temp:
-            cpu_temp = self._get_lhm_sensor("Cpu", "Temperature", "Core")
-        if not cpu_temp:
-            cpu_temp = self._get_wmi_cpu_temp()
-        cpu_usage = int(round(psutil.cpu_percent(interval=None)))
+        if not cpu_temp: cpu_temp = self._get_lhm_sensor("Cpu", "Temperature", "Package")
         
-        # 2. GPU
-        gpu_temp = self._get_lhm_sensor("Gpu", "Temperature", "Core")
-        if not gpu_temp:
-             gpu_temp = self._get_lhm_sensor("Gpu", "Temperature", "GPU")
-        gpu_load = self._get_lhm_sensor("Gpu", "Load", "Core")
-        if not gpu_load:
-            gpu_load = self._get_lhm_sensor("Gpu", "Load", "GPU")
+        cpu_usage = self._get_lhm_sensor("Cpu", "Load", "total") or 0
             
-        # 3. RAM
-        mem = psutil.virtual_memory()
-        ram_used = mem.used / (1024**3)
-        ram_percent = mem.percent
+        gpu_temp = self._get_lhm_sensor("Gpu", "Temperature", "Core")
+        if not gpu_temp: gpu_temp = self._get_lhm_sensor("Gpu", "Temperature", "GPU")
         
-        # 4. FPS (Native ETW / LHM Fallback)
+        gpu_load = self._get_lhm_sensor("Gpu", "Load", "Core")
+        if not gpu_load: gpu_load = self._get_lhm_sensor("Gpu", "Load", "GPU")
+            
+        ram_used = self._get_lhm_sensor("Ram", "data", "used") or 0
+        ram_total = self._get_lhm_sensor("Ram", "data", "total") or 0
+        
         fps = 0
-        show_fps = bool(self.preferences.get_preference("show_game_fps"))
-        if show_fps:
+        if self.show_fps:
             fps = self.fps_monitor.get_fps()
             if fps <= 0:
-                # Try LHM fallback (some GPUs or LHM plugins provide this)
                 lhm_fps = self._get_lhm_sensor("Gpu", "Factor", "Frame Rate")
-                if not lhm_fps:
-                     lhm_fps = self._get_lhm_sensor("Gpu", "Data", "Frame Rate")
-                if lhm_fps:
-                    fps = int(lhm_fps)
+                if lhm_fps: fps = int(lhm_fps)
 
-        # --- Layout Constants ---
-        # 3 Columns: 0-42, 43-85, 86-128
+        # --- Layout ---
         col_width = w // 3
-        c1_x = 0
-        c2_x = col_width
-        c3_x = col_width * 2
-        
-        # Rows (Y positions)
-        y_icon = 0
-        y_text1 = 13
-        y_text2 = 26
+        c1_x, c2_x, c3_x = 0, col_width, col_width * 2
+        y_icon, y_text1, y_text2 = 0, 13, 26
 
         def draw_centered(text, cx, cy, font=None):
-            f = font or self.FONT
-            bbox = draw.textbbox((0, 0), text, font=f)
+            bbox = draw.textbbox((0, 0), text, font=font or self.FONT)
             tw = bbox[2] - bbox[0]
-            draw.text((cx + (col_width - tw) / 2, cy), text, font=f, fill=self.config.primary)
+            draw.text((cx + (col_width - tw) / 2, cy), text, font=font or self.FONT, fill=self.config.primary)
 
         def paste_centered(icon, cx, cy):
-            if icon:
-                # Icon is 12x12
-                ix = cx + (col_width - 12) // 2
-                image.paste(icon, (int(ix), cy))
+            if icon: image.paste(icon, (int(cx + (col_width - 12) // 2), cy))
 
-        # --- Column 1: CPU ---
+        # CPU
         paste_centered(self.cpu_icon, c1_x, y_icon)
-        t_val = f"{int(cpu_temp)}°" if cpu_temp else "--"
-        draw_centered(t_val, c1_x, y_text1)
-        draw_centered(f"{cpu_usage}%", c1_x, y_text2)
+        draw_centered(f"{int(cpu_temp)}°" if cpu_temp else "--", c1_x, y_text1)
+        draw_centered(f"{int(cpu_usage)}%", c1_x, y_text2)
 
-        # --- Column 2: GPU ---
+        # GPU
         paste_centered(self.gpu_icon, c2_x, y_icon)
-        t_val = f"{int(gpu_temp)}°" if gpu_temp else "--"
-        draw_centered(t_val, c2_x, y_text1)
+        draw_centered(f"{int(gpu_temp)}°" if gpu_temp else "--", c2_x, y_text1)
         draw_centered(f"{int(gpu_load) if gpu_load else 0}%", c2_x, y_text2)
 
-        # --- Column 3: RAM / FPS ---
-        if show_fps:
-            # If FPS toggle is ON, always prioritize showing FPS or Idle
-            paste_centered(self.ram_icon, c3_x, y_icon)
-            draw_centered(f"{ram_used:.1f}G", c3_x, y_text1)
+        # RAM / FPS
+        paste_centered(self.ram_icon, c3_x, y_icon)
+        draw_centered(f"{ram_used:.1f}G", c3_x, y_text1)
+        if self.show_fps:
             if fps > 0:
-                # For high FPS (3 digits), shorten the label to avoid overlap
-                val_text = f"{int(fps)}"
-                if fps < 100:
-                    val_text += " FPS"
+                val_text = f"{int(fps)}" + ("" if fps >= 100 else " FPS")
                 draw_centered(val_text, c3_x, y_text2)
             else:
                 draw_centered("Idle", c3_x, y_text2)
         else:
-            # Default RAM display (RAM Used / Total)
-            paste_centered(self.ram_icon, c3_x, y_icon)
-            draw_centered(f"{ram_used:.1f}G", c3_x, y_text1)
-            ram_total = mem.total / (1024**3)
             draw_centered(f"{int(ram_total)}GB", c3_x, y_text2)
 
         return image
