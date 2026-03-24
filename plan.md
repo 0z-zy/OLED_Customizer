@@ -2,6 +2,39 @@
 
 ---
 
+## Plan: Fix Rapid Mute Toggle Not Registering on Discord
+
+**Date:** 2026-03-25 02:39
+
+### Problem
+
+Three debounce/lockout timers combine to block rapid headphone mute button presses from reaching Discord:
+
+1. **600ms Flutter Debounce** (`HIDListener.py:512`) — Ignores hardware reports within 600ms
+2. **1200ms Echo Debounce** (`HIDListener.py:517`) — Ignores hardware reports after a host write
+3. **1500ms Sync Lockout** (`DisplayManager.py:1299`) — Blocks hardware events after a Discord push
+
+**Result:** Quick mute→unmute (or back-to-back presses) within 1.5s are silently dropped.
+
+### Solution
+
+Reduce all timers to responsive values while still preventing echo/firmware loops:
+
+| Timer | File | Old | New |
+|-------|------|-----|-----|
+| Flutter debounce | HIDListener.py | 600ms | 150ms |
+| Echo debounce | HIDListener.py | 1200ms | 400ms |
+| HW→Discord lockout | DisplayManager.py | 1500ms | 600ms |
+| Discord→HW lockout | DisplayManager.py | 1200ms | 600ms |
+| Initial align lockout | DisplayManager.py | 1200ms | 600ms |
+
+### Files Changed
+
+- `src/HIDListener.py` — Reduced flutter and echo debounce timers
+- `src/DisplayManager.py` — Reduced sync lockout timers
+
+---
+
 ## Plan: Brainstorm Discord -> Headset Not Applying
 
 **Date:** 2026-03-24 22:35

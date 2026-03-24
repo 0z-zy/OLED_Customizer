@@ -508,14 +508,14 @@ class HIDListener(threading.Thread):
                                 logger.debug("HID Debounce: Ignoring initial connection chatter -> Muted=%s", is_muted)
                                 continue
 
-                            # 1. Flutter Debounce: Ignore consecutive HW reports within 600ms
-                            if (now - self._last_hw_ts) < 0.6:
-                                logger.debug("HID Debounce: Ignoring hardware flutter (600ms) -> Muted=%s", is_muted)
+                            # 1. Flutter Debounce: Ignore consecutive HW reports within 150ms
+                            if (now - self._last_hw_ts) < 0.15:
+                                logger.debug("HID Debounce: Ignoring hardware flutter (150ms) -> Muted=%s", is_muted)
                                 continue
 
-                            # 2. Echo Debounce: Ignore reports that closely follow a host command (1200ms)
-                            if (now - self._last_write_ts) < 1.2:
-                                logger.debug("HID Debounce: Ignoring command echo (1200ms) -> Muted=%s", is_muted)
+                            # 2. Echo Debounce: Ignore reports that closely follow a host command (400ms)
+                            if (now - self._last_write_ts) < 0.4:
+                                logger.debug("HID Debounce: Ignoring command echo (400ms) -> Muted=%s", is_muted)
                                 continue
 
                             # Update trackers - DisplayManager's RPC loop will pick this up

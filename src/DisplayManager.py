@@ -1251,7 +1251,7 @@ class DisplayManager:
                         self._last_discord_state = new_discord_mute
                         self._last_hw_state = new_discord_mute # Hardware 'follows' Discord on start
                         self._last_hw_event_ts = new_hw_event_ts
-                        self._sync_lockout_until = now + 1.2
+                        self._sync_lockout_until = now + 0.6
                         continue
 
                     # --- PHASE 2: EVENT DETECTION ---
@@ -1273,7 +1273,7 @@ class DisplayManager:
                                 self._hid_listener.set_hardware_mute(new_discord_mute)
                             
                             # Prevent stale hardware echoes from overriding a Discord click.
-                            self._sync_lockout_until = now + 1.2
+                            self._sync_lockout_until = now + 0.6
                              
                             # Update Keyboard OLED + Windows System Mic
                             self.volume_overlay.set_discord_mute(voice["mute"], voice["deaf"], True)
@@ -1296,7 +1296,7 @@ class DisplayManager:
                             self._discord_ipc.set_mute(new_hw_mute)
                              
                             # LOCKOUT: Discord takes ~1s to update.
-                            self._sync_lockout_until = now + 1.5
+                            self._sync_lockout_until = now + 0.6
                              
                             # Update Overlay (OLED + System Mic)
                             self.volume_overlay.set_discord_mute(new_hw_mute, False, True)
