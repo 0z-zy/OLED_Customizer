@@ -125,6 +125,58 @@ class VolumeOverlay:
                 except:
                     pass
 
+    def _sync_all_capture_mics(self, muted, source="Sync"):
+        """Set mute on all active capture devices. Returns True if at least one device was updated."""
+        import ctypes
+        success_count = 0
+        total_count = 0
+        coinit_done = False
+
+        try:
+            ctypes.windll.ole32.CoInitialize(None)
+            coinit_done = True
+        except Exception:
+            pass
+
+        try:
+            import comtypes
+            from comtypes import CLSCTX_ALL, GUID
+            from pycaw.pycaw import IMMDeviceEnumerator, EDataFlow
+
+            clsid = GUID("{BCDE0395-E52F-467C-8E3D-C4579291692E}")
+            enumerator = comtypes.CoCreateInstance(
+                clsid, interface=IMMDeviceEnumerator, clsctx=CLSCTX_ALL
+            )
+            # DEVICE_STATE_ACTIVE = 0x1
+            collection = enumerator.EnumAudioEndpoints(EDataFlow.eCapture.value, 0x1)
+
+            total_count = collection.GetCount()
+            for i in range(total_count):
+                dev = collection.Item(i)
+                if self._set_mic_mute_on_device(dev, muted):
+                    success_count += 1
+        except Exception as e:
+            logger.debug("%s all-capture sync failed: %s", source, e)
+        finally:
+            if coinit_done:
+                try:
+                    ctypes.windll.ole32.CoUninitialize()
+                except Exception:
+                    pass
+
+        if success_count > 0:
+            self._last_mic_mute = muted
+            logger.info(
+                "%s: Synced system mics muted=%s (%s/%s devices)",
+                source,
+                muted,
+                success_count,
+                total_count,
+            )
+            return True
+
+        return False
+
     def set_discord_mute(self, muted, deafened, connected):
         """Called by DisplayManager when Discord RPC reports a mute/deaf state change.
         
@@ -150,13 +202,19 @@ class VolumeOverlay:
         # so that the actual audio stream is gated even if the headset LED is already red.
         if state_changed:
             self._last_mic_mute = effective_mute
-            if self._mic_volume:
+            synced = self._sync_all_capture_mics(effective_mute, source="Discord")
+
+            # Fallback: try cached default mic interface if enumeration path didn't update anything.
+            if not synced and self._mic_volume:
                 try:
                     self._mic_volume.SetMute(effective_mute, None)
-                    logger.info(f"Synced Discord state to Windows Mic: muted={effective_mute}")
+                    logger.info(
+                        "Discord: Fallback sync via default mic interface muted=%s",
+                        effective_mute,
+                    )
                 except Exception as e:
-                    logger.warning(f"Failed to sync Discord state to System Mic: {e}")
-            
+                    logger.warning("Failed to sync Discord state to System Mic: %s", e)
+             
             if time() - self.app_start_time > 4.0:
                 self._last_change = time()
             
@@ -271,22 +329,9 @@ class VolumeOverlay:
             if self._discord_connected:
                 self._discord_muted = muted
 
-
-            # --- NUCLEAR SYNC: Physically mute the Windows system mics ---
-            import ctypes
-            try:
-                ctypes.windll.ole32.CoInitialize(None)
-                from pycaw.pycaw import IMMDeviceEnumerator, EDataFlow
-                import comtypes
-                from comtypes import CLSCTX_ALL, GUID
-                clsid = GUID("{BCDE0395-E52F-467C-8E3D-C4579291692E}")
-                enumerator = comtypes.CoCreateInstance(clsid, interface=IMMDeviceEnumerator, clsctx=CLSCTX_ALL)
-                collection = enumerator.EnumAudioEndpoints(EDataFlow.eCapture.value, 0x1) 
-                for i in range(collection.GetCount()):
-                    dev = collection.Item(i)
-                    self._set_mic_mute_on_device(dev, muted)
-            except Exception as e:
-                logger.debug(f"Hardware-to-System sync failed: {e}")
+            # Keep all active system capture devices aligned with headset hardware state.
+            if not self._sync_all_capture_mics(muted, source="Hardware"):
+                logger.debug("Hardware-to-System sync failed: no active capture device was updated")
 
     def _check_discord(self):
         """Lighter check for Discord presence based on existing RPC connection status.

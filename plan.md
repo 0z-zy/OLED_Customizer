@@ -2,6 +2,85 @@
 
 ---
 
+## Plan: Brainstorm Discord -> Headset Not Applying
+
+**Date:** 2026-03-24 22:35
+
+### Current Observations (From Logs)
+
+1. HID discovery now works and consistently selects `Col05` with read+write open checks passing.
+2. Discord state changes are detected (`Discord State Event: ...`).
+3. Discord -> headset writes are attempted and reported as success (`HID Sync: Success (3/3 writes)`).
+4. Headset button -> app -> Discord path works reliably.
+5. Discord -> headset still appears ineffective on physical headset state/LED.
+
+### Most Likely Causes (Ranked)
+
+1. **Wrong output collection endpoint**
+   - `Col05` is valid for input reports (button events), but firmware might require output on `Col03`/`Col04` for host mute commands.
+   - Write success from `WriteFile` only confirms transport success, not firmware action.
+
+2. **Payload is accepted by HID stack but ignored by firmware**
+   - One or more bytes in report `0d 02 03 00 03 xx` may be version-specific.
+   - The known byte-5 meaning may differ between firmware revisions.
+
+3. **Wrong report type/API for this device revision**
+   - Device may require `HidD_SetFeature` or `HidD_SetOutputReport` instead of plain `WriteFile`.
+   - Some HID devices silently ignore unsupported report channels.
+
+4. **Write-handle strategy mismatch**
+   - Opening a short-lived write handle while a separate read handle is active might not be accepted by firmware state machine.
+   - Device may require a persistent shared handle or strict serialization.
+
+5. **Discord effective state mapping edge cases**
+   - `mute/deaf` transitions can produce rapid true/false flips; headset command may be overwritten by next poll cycle.
+   - App may need per-source debounce and command deduping.
+
+6. **Timing/protocol pacing issue**
+   - Triple pulse at 20 ms may be too fast or too short for this firmware.
+   - Some devices require 50-150 ms spacing or a single clean write.
+
+### Diagnostic Experiments
+
+1. **Endpoint sweep**
+   - Send the exact same mute/unmute payload to all discovered `Col01..Col06`.
+   - Record which endpoint actually changes headset LED/state.
+
+2. **Report variation sweep**
+   - Keep `0d 02 03 00 03` fixed and test candidate values around byte-5 and adjacent control bytes.
+   - Correlate with physical headset response.
+
+3. **API sweep**
+   - Test `WriteFile` vs `HidD_SetFeature` vs `HidD_SetOutputReport` on the same endpoint/payload.
+   - Keep all other variables fixed.
+
+4. **Handle model test**
+   - Compare short-lived write handle vs persistent write handle vs single bidirectional handle.
+   - Check if one model yields consistent Discord -> headset action.
+
+5. **Ack-based validation**
+   - After each write, wait up to 500 ms for a matching incoming HID report.
+   - If no confirm report arrives, treat command as unconfirmed and retry with alternate path.
+
+6. **Discord event trace hardening**
+   - Log raw `mute`, raw `deaf`, computed effective state, command sent, and post-send observed headset state.
+   - Verify no immediate loop cycle reverses the intended command.
+
+### Proposed Next Debug Build Scope
+
+1. Add a temporary "HID Diagnostics" mode that can manually trigger mute/unmute and endpoint selection.
+2. Add endpoint and API fallback chain for Discord-originated writes.
+3. Mark write result as `transport_ok` vs `state_confirmed` (separate metrics in logs).
+4. Keep current working path (headset -> Discord) unchanged while experimenting.
+
+### Exit Criteria
+
+1. Discord mute/unmute consistently changes headset state within 1 second.
+2. Headset button still syncs to Discord with no regressions.
+3. No mute oscillation/override loops in logs for a 5-minute stress test.
+
+---
+
 ## Plan: Fix Bi-Directional Mute Sync (Discord & Headset)
 
 **Date:** 2026-03-24 06:10
