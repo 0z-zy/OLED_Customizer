@@ -2,6 +2,36 @@
 
 ---
 
+## Plan: Fix Bi-Directional Mute Sync (Discord & Headset)
+
+**Date:** 2026-03-24 06:10
+
+### Problem
+
+1. **Discord -> Headset**: When muting in Discord, the Keyboard OLED updates correctly, but the physical Headset LED does not mute.
+2. **Headset -> Discord**: Pressing the physical mute button on the headset mutes system microphones but fails to update Discord. Additionally, the Keyboard OLED shows the wrong status (Unmuted) because it prioritizes Discord's state.
+
+### Solution
+
+1. **DiscordRPC.py — Write Support**: Add `set_mute(muted)` to send `SET_VOICE_SETTINGS` commands to Discord's IPC.
+2. **DisplayManager.py — Bi-directional Sync Loop**: 
+   - Check if the hardware state (from `HIDListener`) has changed compared to Discord.
+   - If changed, push the new state to Discord using `DiscordIPC.set_mute`.
+   - Ensure the headset LED is always in sync with the current source of truth.
+3. **volume.py — State Consistency**: Ensure `_last_mic_mute` reflects the actual system state even when Discord is connected.
+
+### Files Changed
+
+- `src/DiscordRPC.py` — Added `set_mute()` method.
+- `src/DisplayManager.py` — Updated `_discord_rpc_loop` to handle hardware-to-discord sync.
+- `src/volume.py` — Refined state priority for better consistency.
+
+---
+
+
+
+---
+
 ## Plan: Discord Mic Mute Detection (Replace System Mic Muting)
 
 **Date:** 2026-03-24 02:09

@@ -4,6 +4,10 @@ from psutil import pid_exists
 import os
 from os import getpid, path, makedirs, remove
 import atexit
+import ctypes
+from datetime import datetime
+import threading
+from threading import Thread
 import sys
 import psutil
 import time
@@ -26,6 +30,8 @@ from version import __version__
 from src.Config import Config
 from src.DisplayManager import DisplayManager
 from src.utils import fetch_app_data_path
+import src.SettingsWindow # Pre-load to avoid background thread import crash
+import tkinter # Pre-load on main thread
 
 def cleanup_old_updates():
     """Removes the leftover .old executable from an in-place update if it exists."""

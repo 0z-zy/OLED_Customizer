@@ -664,7 +664,7 @@ class SettingsGUI:
         redirect_uri = f"http://127.0.0.1:{port}"
         
         # Open browser for OAuth
-        url = f"https://discord.com/api/oauth2/authorize?client_id={cid}&redirect_uri={redirect_uri}&response_type=code&scope=rpc%20rpc.voice.read"
+        url = f"https://discord.com/api/oauth2/authorize?client_id={cid}&redirect_uri={redirect_uri}&response_type=code&scope=rpc%20rpc.voice.read%20rpc.voice.write"
         logger.info(f"Opening browser for Discord Auth: {url}")
         webbrowser.open(url)
         

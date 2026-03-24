@@ -1,7 +1,7 @@
 import logging
+import pythoncom
 import os
 from time import time
-import psutil
 
 from PIL import Image, ImageDraw
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume, IMMDeviceEnumerator, EDataFlow, ERole
@@ -43,7 +43,10 @@ class VolumeOverlay:
         
         # Discord State
         self._discord_running = False
+        self._discord_connected = False # Set by DisplayManager
         self._last_discord_check = 0
+        self._mic_changed_externally = False
+        self._last_synced_mic_mute = None
         
         # Discord RPC mute state (set externally by DisplayManager's Discord RPC thread)
         self._discord_muted = None   # None = unknown/not connected, True/False = mute state
@@ -141,19 +144,16 @@ class VolumeOverlay:
         # Combined mute state: either muted or deafened
         effective_mute = bool(muted or deafened)
         
-        # Trigger overlay if either state changed
+        # Trigger overlay/sync if either state changed
         state_changed = (connected and (muted != old_muted or deafened != old_deafened))
-        
+        # We always attempt to sync the Discord state to the physical Windows device
+        # so that the actual audio stream is gated even if the headset LED is already red.
         if state_changed:
-            # Also update the internal mic mute state so the icon reflects it (fallback)
             self._last_mic_mute = effective_mute
-            
-            # --- SYNC TO SYSTEM MICROPHONE ---
             if self._mic_volume:
                 try:
-                    # Sync the Discord state back to the physical Windows device
                     self._mic_volume.SetMute(effective_mute, None)
-                    logger.debug(f"Synced Discord state to Windows Mic: muted={effective_mute}")
+                    logger.info(f"Synced Discord state to Windows Mic: muted={effective_mute}")
                 except Exception as e:
                     logger.warning(f"Failed to sync Discord state to System Mic: {e}")
             
@@ -257,19 +257,48 @@ class VolumeOverlay:
         if time() - self.app_start_time > 4.0: self._last_change = time()
         logger.info(f"Fallback mode (Visual Only): Mic mute overlay = {self._last_mic_mute}")
 
+    def set_mic_mute_from_hardware(self, muted):
+        """Called by HIDListener to sync physical headset state to App/Discord."""
+        if muted != self._last_mic_mute:
+            self._last_mic_mute = muted
+            self._mic_changed_externally = True 
+            if time() - self.app_start_time > 4.0:
+                self._last_change = time()
+            logger.info(f"Hardware Mic change propagated: muted={muted}")
+
+            # Snappy UI: If Discord is connected, update the displayed mute state immediately
+            # so the OLED doesn't lag behind the physical button press.
+            if self._discord_connected:
+                self._discord_muted = muted
+
+
+            # --- NUCLEAR SYNC: Physically mute the Windows system mics ---
+            import ctypes
+            try:
+                ctypes.windll.ole32.CoInitialize(None)
+                from pycaw.pycaw import IMMDeviceEnumerator, EDataFlow
+                import comtypes
+                from comtypes import CLSCTX_ALL, GUID
+                clsid = GUID("{BCDE0395-E52F-467C-8E3D-C4579291692E}")
+                enumerator = comtypes.CoCreateInstance(clsid, interface=IMMDeviceEnumerator, clsctx=CLSCTX_ALL)
+                collection = enumerator.EnumAudioEndpoints(EDataFlow.eCapture.value, 0x1) 
+                for i in range(collection.GetCount()):
+                    dev = collection.Item(i)
+                    self._set_mic_mute_on_device(dev, muted)
+            except Exception as e:
+                logger.debug(f"Hardware-to-System sync failed: {e}")
+
     def _check_discord(self):
+        """Lighter check for Discord presence based on existing RPC connection status.
+        This avoids expensive process iteration (psutil).
+        """
         if time() - self._last_discord_check < 2.0:
             return
         
         self._last_discord_check = time()
-        running = False
-        try:
-             for p in psutil.process_iter(['name']):
-                 if p.info['name'] and 'discord' in p.info['name'].lower():
-                     running = True
-                     break
-        except Exception:
-            pass
+        
+        # We rely on DisplayManager setting _discord_connected via RPC
+        running = self._discord_connected
         
         if running != self._discord_running:
             self._discord_running = running

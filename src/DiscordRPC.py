@@ -226,6 +226,10 @@ class DiscordIPC:
                     "mute": bool(data.get("mute", False)),
                     "deaf": bool(data.get("deaf", False))
                 }
+            elif resp.get("evt") == "ERROR":
+                logger.error(f"Discord RPC Error: {resp.get('data', {}).get('message', 'Unknown error')}")
+            elif resp.get("cmd") == "SET_VOICE_SETTINGS" and resp.get("evt") == "ERROR":
+                logger.error(f"Failed to set voice settings: {resp.get('data', {}).get('message', 'Unknown error')}")
             elif resp.get("cmd") == "GET_VOICE_SETTINGS":
                 data = resp.get("data", {})
                 self._last_voice_state = {
@@ -248,7 +252,30 @@ class DiscordIPC:
 
         return self._last_voice_state
 
+    def set_mute(self, muted):
+        """Send SET_VOICE_SETTINGS command to Discord to update mute state.
+        
+        Args:
+            muted: True to mute, False to unmute
+        """
+        if not self.is_connected or not self._authenticated:
+            return False
+
+        try:
+            self._send(self.OP_FRAME, {
+                "cmd": "SET_VOICE_SETTINGS",
+                "args": {"mute": muted},
+                "nonce": str(uuid.uuid4())
+            })
+            # We don't wait for response here, it will be drained in get_voice_settings
+            logger.info(f"Sent SET_VOICE_SETTINGS to Discord: mute={muted}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send SET_VOICE_SETTINGS: {e}")
+            return False
+
     def close(self):
+
         self._connected = False
         self._authenticated = False
         if self._pipe:
