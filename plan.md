@@ -2,6 +2,30 @@
 
 ---
 
+## Plan: Discord Mic Mute Detection (Replace System Mic Muting)
+
+**Date:** 2026-03-24 02:09
+
+### Problem
+Pressing the mute hotkey muted ALL system microphones ("nuclear option"). This is not ideal — it mutes your mic in every app, not just Discord.
+
+### Solution
+Instead of muting system mics, **read Discord's actual mute/deaf state** via its local IPC pipe (`\\.\pipe\discord-ipc-0`). The OLED passively shows whether Discord says you're muted. No bot, no OAuth needed — just a Discord Application ID.
+
+### How It Works
+1. New `src/DiscordRPC.py` connects to Discord's named pipe IPC
+2. Sends `GET_VOICE_SETTINGS` every ~2 seconds
+3. Reads `mute` and `deaf` booleans from the response
+4. `volume.py` shows Discord mute state on OLED (priority over system mic state)
+5. Falls back to system mic detection when Discord isn't running
+
+### Files Changed
+- `src/DiscordRPC.py` (NEW) — Discord IPC pipe client
+- `src/volume.py` — Discord mute state priority, `set_discord_mute()`, hotkey skips system toggle when Discord connected
+- `src/DisplayManager.py` — Discord RPC thread, cleanup on shutdown
+
+---
+
 ## Plan: Fix OLED Display Disappearing (Auto-Recovery)
 
 **Date:** 2026-03-16 06:08

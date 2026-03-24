@@ -43,7 +43,12 @@ class UserPreferences:
         "show_game_fps": False,
         "selected_gpu": "Auto",
         "hotkey_calculator": "Key.insert",
-        "hotkey_mute_2": ""
+        "hotkey_mute_2": "",
+        "discord_client_id": "",
+        "discord_client_secret": "",
+        "discord_access_token": "",
+        "local_port": 2408,
+        "discord_local_port": 8888
     }
 
     def __init__(self):

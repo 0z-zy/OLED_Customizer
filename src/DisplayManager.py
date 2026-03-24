@@ -15,6 +15,7 @@ from src.Systray import run_systray_async
 from src.WindowsMedia import WindowsMedia
 from src.HardwareMonitor import HardwareMonitor
 from src.ExtensionReceiver import ExtensionReceiver
+from src.DiscordRPC import DiscordIPC
 from src.utils import is_process_running, find_steelseries_gg_path, launch_process
 import asyncio
 
@@ -75,7 +76,8 @@ class DisplayManager:
 
         self.volume_overlay = VolumeOverlay(config)
         self.hardware_monitor = HardwareMonitor(config, self.user_preferences)
-        self.extension_receiver = ExtensionReceiver(port=8888)
+        discord_port = self.user_preferences.get_preference("discord_local_port") or 8888
+        self.extension_receiver = ExtensionReceiver(port=discord_port)
         self.extension_receiver.start()
 
         # Setup global keyboard hook (raw Windows WH_KEYBOARD_LL)
@@ -105,6 +107,15 @@ class DisplayManager:
         self._smtc_data = None
         self._smtc_lock = __import__('threading').Lock()
         Thread(target=self._poll_smtc_loop, daemon=True).start()
+
+        # Discord RPC — polls Discord's local IPC for mic mute/deaf state
+        discord_cid = self.user_preferences.get_preference("discord_client_id") or None
+        self._discord_ipc = DiscordIPC(
+            client_id=discord_cid, 
+            preferences=self.user_preferences,
+            extension_receiver=self.extension_receiver
+        )
+        Thread(target=self._discord_rpc_loop, daemon=True, name="Discord-RPC").start()
 
         now_ms = int(time() * 1000)
 
@@ -599,6 +610,11 @@ class DisplayManager:
         
         self.auto_launch_gg = self.user_preferences.get_preference("auto_launch_gg")
 
+        # Discord
+        discord_cid = self.user_preferences.get_preference("discord_client_id")
+        if hasattr(self, "_discord_ipc"):
+            self._discord_ipc.set_client_id(discord_cid)
+
         self._spotify_poll_ms = max(250, int(self.fetch_delay * 1000))
         
         # Reload Spotify credentials if they changed (only if Spotify is enabled)
@@ -848,15 +864,11 @@ class DisplayManager:
                             except Exception as re:
                                 logger.error("Re-registration failed: %s", re)
 
-            # Heartbeat & GC: keep the game registered (every 30s) and clean up memory
+            # Heartbeat: keep the game registered (every 30s)
             if now_sec - self._last_heartbeat_time > 30.0:
                 self._last_heartbeat_time = now_sec
                 try:
                     self.steelseries_api.heartbeat()
-                    # Perform manual GC to prevent heap fragmentation / access violations
-                    # especially after long runtimes with multiple C extensions (COM/WinRT)
-                    import gc
-                    gc.collect()
                 except Exception:
                     pass
 
@@ -1066,6 +1078,13 @@ class DisplayManager:
             except Exception:
                 pass
 
+        # Close Discord IPC connection
+        if hasattr(self, "_discord_ipc"):
+            try:
+                self._discord_ipc.close()
+            except Exception:
+                pass
+
         logger.info("DisplayManager shutdown complete")
 
     def _poll_smtc_loop(self):
@@ -1128,3 +1147,47 @@ class DisplayManager:
                 ctypes.windll.ole32.CoInitialize(0)
             except Exception:
                 pass
+
+    def _discord_rpc_loop(self):
+        """Background thread that polls Discord's local IPC for mic mute/deaf state.
+        
+        Connects to Discord's named pipe (discord-ipc-0), sends GET_VOICE_SETTINGS
+        every ~2 seconds, and updates the volume overlay's Discord mute state.
+        Auto-reconnects if Discord restarts or pipe disconnects.
+        """
+        logger.info("Discord RPC poll thread started")
+        
+        while self._running:
+            try:
+                # Try to connect if not already connected
+                if not self._discord_ipc.is_connected:
+                    if self._discord_ipc.connect():
+                        logger.info("Discord IPC connected — now tracking mute state")
+                        # Initial poll right after connecting
+                        voice = self._discord_ipc.get_voice_settings()
+                        if voice:
+                            self.volume_overlay.set_discord_mute(
+                                voice["mute"], voice["deaf"], True
+                            )
+                    else:
+                        # Discord not running — clear state and wait longer before retry
+                        self.volume_overlay.set_discord_mute(None, None, False)
+                        sleep(10)
+                        continue
+                
+                # Listen/Poll for voice settings
+                voice = self._discord_ipc.get_voice_settings()
+                if voice:
+                    # Update overlay
+                    self.volume_overlay.set_discord_mute(
+                        voice["mute"], voice["deaf"], True
+                    )
+                
+                # Sleep briefly. get_voice_settings drains events instantly.
+                sleep(0.5)
+                
+            except Exception as e:
+                logger.debug(f"Discord RPC loop error: {e}")
+                self.volume_overlay.set_discord_mute(None, None, False)
+                self._discord_ipc.close()
+                sleep(10)  # Wait before retry on error

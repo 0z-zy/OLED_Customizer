@@ -45,6 +45,11 @@ class VolumeOverlay:
         self._discord_running = False
         self._last_discord_check = 0
         
+        # Discord RPC mute state (set externally by DisplayManager's Discord RPC thread)
+        self._discord_muted = None   # None = unknown/not connected, True/False = mute state
+        self._discord_deafened = None
+        self._discord_connected = False  # True when IPC pipe is connected
+        
         # Initial state fetch to prevent showing overlay on startup
         self._silent_init()
 
@@ -117,8 +122,63 @@ class VolumeOverlay:
                 except:
                     pass
 
+    def set_discord_mute(self, muted, deafened, connected):
+        """Called by DisplayManager when Discord RPC reports a mute/deaf state change.
+        
+        Args:
+            muted: True if mic is muted in Discord, False if unmuted, None if unknown
+            deafened: True if deafened in Discord, False if not, None if unknown  
+            connected: True if Discord IPC pipe is connected
+        """
+        old_muted = self._discord_muted
+        old_deafened = self._discord_deafened
+        old_connected = self._discord_connected
+        
+        self._discord_muted = muted
+        self._discord_deafened = deafened
+        self._discord_connected = connected
+        
+        # Combined mute state: either muted or deafened
+        effective_mute = bool(muted or deafened)
+        
+        # Trigger overlay if either state changed
+        state_changed = (connected and (muted != old_muted or deafened != old_deafened))
+        
+        if state_changed:
+            # Also update the internal mic mute state so the icon reflects it (fallback)
+            self._last_mic_mute = effective_mute
+            
+            # --- SYNC TO SYSTEM MICROPHONE ---
+            if self._mic_volume:
+                try:
+                    # Sync the Discord state back to the physical Windows device
+                    self._mic_volume.SetMute(effective_mute, None)
+                    logger.debug(f"Synced Discord state to Windows Mic: muted={effective_mute}")
+                except Exception as e:
+                    logger.warning(f"Failed to sync Discord state to System Mic: {e}")
+            
+            if time() - self.app_start_time > 4.0:
+                self._last_change = time()
+            
+            logger.info(f"Discord voice changed: muted={muted}, deaf={deafened} -> Syncing to System Mic")
+        
+        # If Discord just connected/disconnected, trigger overlay briefly
+        if connected != old_connected:
+            if time() - self.app_start_time > 4.0:
+                self._last_change = time()
+
     def toggle_mic_mute(self):
-        """Toggle mic mute state - Nuclear Option: Mutes ALL active capture devices if no default found."""
+        """Toggle mic mute state.
+        
+        If Discord IPC is connected, this is a no-op — Discord handles muting.
+        Otherwise falls back to system mic mute (legacy behavior).
+        """
+        # If Discord is connected, don't touch system mics — Discord handles it
+        if self._discord_connected:
+            logger.info("Discord connected — mic mute is handled by Discord, skipping system toggle")
+            return
+        
+        # --- LEGACY FALLBACK: System mic mute when Discord is NOT running ---
         import ctypes
         try:
             ctypes.windll.ole32.CoInitialize(None)
@@ -130,60 +190,60 @@ class VolumeOverlay:
             from pycaw.pycaw import IAudioEndpointVolume
             from comtypes import CLSCTX_ALL, GUID
             
-        try:
-            # --- PHASE 1: Try Standard Roles ---
-            target_roles = [ERole.eCommunications.value, ERole.eMultimedia.value]
-            default_mic = None
-            
-            for role in target_roles:
-                try:
-                    default_mic = AU.GetMicrophone(role)
-                    if default_mic:
-                        break
-                except Exception:
-                    continue
-
-            if default_mic:
-                try:
-                    interface = default_mic.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                    mic_volume = cast(interface, POINTER(IAudioEndpointVolume))
-                    new_state = not bool(mic_volume.GetMute())
-                    mic_volume.SetMute(new_state, None)
-                    self._last_mic_mute = new_state
-                    if time() - self.app_start_time > 4.0: self._last_change = time()
-                    logger.info(f"Toggled Default Mic Mute to {new_state}")
-                    return
-                except Exception:
-                    pass
-
-            # --- PHASE 2: NUCLEAR OPTION ---
             try:
-                from pycaw.pycaw import IMMDeviceEnumerator, EDataFlow
-                import comtypes
-                clsid = GUID("{BCDE0395-E52F-467C-8E3D-C4579291692E}")
-                enumerator = comtypes.CoCreateInstance(clsid, interface=IMMDeviceEnumerator, clsctx=CLSCTX_ALL)
-                collection = enumerator.EnumAudioEndpoints(EDataFlow.eCapture.value, 0x1) 
+                # --- PHASE 1: Try Standard Roles ---
+                target_roles = [ERole.eCommunications.value, ERole.eMultimedia.value]
+                default_mic = None
                 
-                count = collection.GetCount()
-                if count > 0:
-                    target_mute_state = not (self._last_mic_mute if self._last_mic_mute is not None else False)
-                    success_count = 0
-                    for i in range(count):
-                        dev = collection.Item(i)
-                        if self._set_mic_mute_on_device(dev, target_mute_state):
-                            success_count += 1
-                    
-                    if success_count > 0:
-                        self._last_mic_mute = target_mute_state
-                        if time() - self.app_start_time > 4.0: self._last_change = time()
-                        logger.info(f"Nuclear Mute success: Toggled {success_count}/{count} devices to {target_mute_state}")
-                        return
-            except Exception as e:
-                logger.debug(f"Nuclear search failed: {e}")
+                for role in target_roles:
+                    try:
+                        default_mic = AU.GetMicrophone(role)
+                        if default_mic:
+                            break
+                    except Exception:
+                        continue
 
-            logger.warning("No microphone device found during toggle")
-        except Exception as e:
-            logger.warning(f"System mic control failed: {e}")
+                if default_mic:
+                    try:
+                        interface = default_mic.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                        mic_volume = cast(interface, POINTER(IAudioEndpointVolume))
+                        new_state = not bool(mic_volume.GetMute())
+                        mic_volume.SetMute(new_state, None)
+                        self._last_mic_mute = new_state
+                        if time() - self.app_start_time > 4.0: self._last_change = time()
+                        logger.info(f"Toggled Default Mic Mute to {new_state}")
+                        return
+                    except Exception:
+                        pass
+
+                # --- PHASE 2: NUCLEAR OPTION ---
+                try:
+                    from pycaw.pycaw import IMMDeviceEnumerator, EDataFlow
+                    import comtypes
+                    clsid = GUID("{BCDE0395-E52F-467C-8E3D-C4579291692E}")
+                    enumerator = comtypes.CoCreateInstance(clsid, interface=IMMDeviceEnumerator, clsctx=CLSCTX_ALL)
+                    collection = enumerator.EnumAudioEndpoints(EDataFlow.eCapture.value, 0x1) 
+                    
+                    count = collection.GetCount()
+                    if count > 0:
+                        target_mute_state = not (self._last_mic_mute if self._last_mic_mute is not None else False)
+                        success_count = 0
+                        for i in range(count):
+                            dev = collection.Item(i)
+                            if self._set_mic_mute_on_device(dev, target_mute_state):
+                                success_count += 1
+                        
+                        if success_count > 0:
+                            self._last_mic_mute = target_mute_state
+                            if time() - self.app_start_time > 4.0: self._last_change = time()
+                            logger.info(f"Nuclear Mute success: Toggled {success_count}/{count} devices to {target_mute_state}")
+                            return
+                except Exception as e:
+                    logger.debug(f"Nuclear search failed: {e}")
+
+                logger.warning("No microphone device found during toggle")
+            except Exception as e:
+                logger.warning(f"System mic control failed: {e}")
         finally:
             # CRITICAL: Always uninitialize COM to prevent handle leaks over long runtimes
             try:
@@ -291,11 +351,16 @@ class VolumeOverlay:
         if icon_key in self.icons:
             image.paste(self.icons[icon_key], (2, 14))
             
-        # 2. Mic Icon (Always show if state is known)
+        # 2. Mic Icon — Discord state takes priority, falls back to system mic state
         mic_width = 0
-        if self._last_mic_mute is not None:
+        mic_mute_state = self._last_mic_mute  # System mic state (fallback)
+        if self._discord_connected and (self._discord_muted is not None or self._discord_deafened is not None):
+            # Combined mute state for display: either muted OR deafened
+            mic_mute_state = bool(self._discord_muted or self._discord_deafened)
+        
+        if mic_mute_state is not None:
             mic_width = 12
-            mic_key = "mic_off" if self._last_mic_mute else "mic_on"
+            mic_key = "mic_off" if mic_mute_state else "mic_on"
             if mic_key in self.icons:
                 image.paste(self.icons[mic_key], (w - 14, 14))
 

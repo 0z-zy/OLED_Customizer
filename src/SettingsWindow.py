@@ -1,6 +1,6 @@
 """
-OLED Customizer - Ultra Premium Settings GUI
-Frameless window, sidebar navigation, custom widgets, high-end aesthetics.
+OLED Customizer - Settings GUI
+Frameless window, sidebar navigation, custom widgets, clean aesthetics.
 """
 
 import tkinter as tk
@@ -175,13 +175,13 @@ class SettingsGUI:
         self.root = tk.Tk()
         self.current_page = None # CRITICAL: Ensure first page logic triggers
         self.root.overrideredirect(True) # Frameless
-        self.root.geometry("640x540")
+        self.root.geometry("640x600")
         self.root.configure(bg=Colors.BG_ROOT)
         
         # Center
         self.root.update_idletasks()
         x = (self.root.winfo_screenwidth() - 640) // 2
-        y = (self.root.winfo_screenheight() - 540) // 2
+        y = (self.root.winfo_screenheight() - 600) // 2
         self.root.geometry(f"+{x}+{y}")
         
         # FIX: Force taskbar icon for frameless window
@@ -250,9 +250,35 @@ class SettingsGUI:
                              relief="flat", cursor="hand2", command=self._save_all)
         save_btn.pack(fill="x", padx=15, pady=20)
 
-        # === CONTENT AREA ===
-        self.content_area = tk.Frame(container, bg=Colors.CONTENT)
-        self.content_area.pack(side="right", fill="both", expand=True)
+        # === CONTENT AREA (Scrollable) ===
+        self.content_container = tk.Frame(container, bg=Colors.CONTENT)
+        self.content_container.pack(side="right", fill="both", expand=True)
+        
+        self.canvas = tk.Canvas(self.content_container, bg=Colors.CONTENT, highlightthickness=0)
+        self.scrollbar = tk.Scrollbar(self.content_container, orient="vertical", command=self.canvas.yview, 
+                                      bg=Colors.SIDEBAR, troughcolor=Colors.BG_ROOT, width=10)
+        
+        self.content_area = tk.Frame(self.canvas, bg=Colors.CONTENT)
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.content_area, anchor="nw")
+        
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.canvas.pack(side="left", fill="both", expand=True)
+        
+        # Only show scrollbar when needed
+        def update_scroll(e=None):
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+            if self.canvas.bbox("all")[3] > self.canvas.winfo_height():
+                self.scrollbar.pack(side="right", fill="y")
+            else:
+                self.scrollbar.pack_forget()
+
+        self.content_area.bind("<Configure>", update_scroll)
+        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfig(self.canvas_window, width=e.width))
+        
+        # Mouse wheel support
+        def _on_mousewheel(event):
+            self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        self.root.bind("<MouseWheel>", _on_mousewheel)
         
         # Initialize Pages
         self._init_variables()
@@ -282,6 +308,7 @@ class SettingsGUI:
         self.vars["spotify_client_secret"] = tk.StringVar(value=self.prefs.get_preference("spotify_client_secret") or "")
         self.vars["spotify_redirect_uri"] = tk.StringVar(value=self.prefs.get_preference("spotify_redirect_uri") or "")
         self.vars["local_port"] = tk.StringVar(value=str(self.prefs.get_preference("local_port") or "2408"))
+        self.vars["discord_local_port"] = tk.StringVar(value=str(self.prefs.get_preference("discord_local_port") or "8888"))
         # Hotkeys
         self.vars["hotkey_monitor"] = tk.StringVar(value=self.prefs.get_preference("hotkey_monitor") or "")
         self.vars["hotkey_mute"] = tk.StringVar(value=self.prefs.get_preference("hotkey_mute") or "")
@@ -299,6 +326,9 @@ class SettingsGUI:
         self.vars["show_game_fps"] = tk.BooleanVar(value=bool(self.prefs.get_preference("show_game_fps")))
         self.vars["selected_gpu"] = tk.StringVar(value=self.prefs.get_preference("selected_gpu") or "Auto")
         self.vars["spotify_fetch_delay"] = tk.StringVar(value=str(self.prefs.get_preference("spotify_fetch_delay") or "2"))
+        # Discord
+        self.vars["discord_client_id"] = tk.StringVar(value=self.prefs.get_preference("discord_client_id") or "")
+        self.vars["discord_client_secret"] = tk.StringVar(value=self.prefs.get_preference("discord_client_secret") or "")
 
     def _create_pages(self):
         # -- GENERAL PAGE --
@@ -411,6 +441,38 @@ class SettingsGUI:
         self._toggle_row(p_adv, "Auto-Launch SteelSeries GG", self.vars["auto_launch_gg"])
         tk.Label(p_adv, text="   Automatically starts SteelSeries GG if not running.", 
                  font=FONT_SMALL, fg=Colors.TEXT_DIM, bg=Colors.CONTENT).pack(anchor="w", pady=(0, 10))
+
+        # Discord Section
+        tk.Frame(p_adv, bg=Colors.CONTENT, height=10).pack()
+        self._header(p_adv, "🎙️ Discord Mic Detection")
+        self._entry_row(p_adv, "Discord Application ID", self.vars["discord_client_id"], width=25)
+        self._entry_row(p_adv, "Discord Client Secret", self.vars["discord_client_secret"], width=25, show="*")
+        tk.Label(p_adv, text="   Required for mic detection authorization.", 
+                 font=FONT_SMALL, fg=Colors.TEXT_DIM, bg=Colors.CONTENT).pack(anchor="w", pady=(0, 10))
+
+        self._entry_row(p_adv, "Discord Listener Port", self.vars["discord_local_port"], width=25)
+        tk.Label(p_adv, text="   Matches 'Redirect URI' in Discord Portal (default 8888).", 
+                 font=FONT_SMALL, fg=Colors.TEXT_DIM, bg=Colors.CONTENT).pack(anchor="w", pady=(0, 10))
+
+        # Connect Button
+        btn_frame = tk.Frame(p_adv, bg=Colors.CONTENT)
+        btn_frame.pack(fill="x", padx=5, pady=10)
+        
+        self.discord_btn = tk.Button(btn_frame, text="🔗 Connect Discord", font=FONT_SUBHEADER,
+                                     bg=Colors.CARD_BG, fg=Colors.TEXT_MAIN,
+                                     activebackground=Colors.CARD_HOVER, activeforeground=Colors.TEXT_MAIN,
+                                     relief="flat", cursor="hand2", padx=20, pady=5,
+                                     command=self._authorize_discord_action)
+        self.discord_btn.pack(side="left")
+
+        # Status Label
+        token = self.prefs.get_preference("discord_access_token")
+        status_text = "✅ Connected" if token else "❌ Not Authorized"
+        status_color = "#4CAF50" if token else Colors.DANGER
+        self.discord_status_lbl = tk.Label(btn_frame, text=status_text, font=FONT_SMALL,
+                                           fg=status_color, bg=Colors.CONTENT)
+        self.discord_status_lbl.pack(side="left", padx=15)
+
         self.pages["Advanced"] = p_adv
 
         # -- BACKUPS PAGE --
@@ -582,6 +644,32 @@ class SettingsGUI:
             else:
                 messagebox.showerror("Error", "Failed to delete backup.", parent=self.root)
 
+    def _authorize_discord_action(self):
+        """Action for 'Connect Discord' button"""
+        from src.DiscordRPC import DiscordIPC
+        import webbrowser
+        
+        # Save current ID/Secret first
+        self.prefs.preferences["discord_client_id"] = self.vars["discord_client_id"].get()
+        self.prefs.preferences["discord_client_secret"] = self.vars["discord_client_secret"].get()
+        self.prefs.save_preferences()
+        
+        cid = self.vars["discord_client_id"].get()
+        if not cid:
+            messagebox.showerror("Error", "Please enter a Discord Application ID first.", parent=self.root)
+            return
+            
+        # ExtensionReceiver runs on discord_local_port
+        port = self.vars["discord_local_port"].get()
+        redirect_uri = f"http://127.0.0.1:{port}"
+        
+        # Open browser for OAuth
+        url = f"https://discord.com/api/oauth2/authorize?client_id={cid}&redirect_uri={redirect_uri}&response_type=code&scope=rpc%20rpc.voice.read"
+        logger.info(f"Opening browser for Discord Auth: {url}")
+        webbrowser.open(url)
+        
+        messagebox.showinfo("Authorization", "Please check your browser to authorize Discord, then wait for the 'Connected' status in this window.", parent=self.root)
+
     def _duplicate_backup_action(self, path):
         from src import ProfileBackup
         logger.info(f"Duplicate requested for backup: {os.path.basename(path)}")
@@ -601,6 +689,10 @@ class SettingsGUI:
         # Show selected
         if page_name in self.pages:
             self.pages[page_name].pack(fill="both", expand=True, padx=30, pady=20)
+            # Reset scroll for the new page
+            self.canvas.yview_moveto(0)
+            self.root.update_idletasks()
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
             
         # Update Nav
         for name, btn in self.nav_buttons.items():
@@ -850,7 +942,7 @@ class SettingsGUI:
                 val = v.get()
                 logger.info(f"Saving {k}: {val}")
                 
-                if k in ["scrollbar_padding", "text_padding_left", "local_port", "spotify_fetch_delay"]:
+                if k in ["scrollbar_padding", "text_padding_left", "local_port", "discord_local_port", "spotify_fetch_delay"]:
                     try: val = int(val)
                     except Exception: val = 0
                     self.prefs.preferences[k] = val
@@ -868,7 +960,7 @@ class SettingsGUI:
             # Apply System Settings
             set_startup(self.vars["run_on_start"].get())
             
-            logger.info("Settings Saved via Ultra-Premium GUI")
+            logger.info("Settings Saved")
             
             # Show success message – include update instruction only on Spotify page
             if getattr(self, "current_page", None) == "Spotify":

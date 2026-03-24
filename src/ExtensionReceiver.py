@@ -10,16 +10,31 @@ class ExtensionData:
     def __init__(self):
         self.data = None
         self.last_update = 0
+        self.discord_code = None
+        self._lock = threading.Lock()
 
     def update(self, new_data):
-        self.data = new_data
-        self.last_update = time.time()
+        with self._lock:
+            self.data = new_data
+            self.last_update = time.time()
 
     def get_data(self):
-        # Data is valid for 5 seconds
-        if self.data and (time.time() - self.last_update < 5):
-            return self.data
+        with self._lock:
+            # Data is valid for 5 seconds
+            if self.data and (time.time() - self.last_update < 5):
+                return self.data
         return None
+
+    def set_discord_code(self, code):
+        with self._lock:
+            self.discord_code = code
+            logger.info(f"Captured Discord Auth Code: {code[:10]}...")
+
+    def consume_discord_code(self):
+        with self._lock:
+            code = self.discord_code
+            self.discord_code = None
+            return code
 
 # Global storage instance
 extension_storage = ExtensionData()
@@ -60,6 +75,25 @@ class ExtensionHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+    def do_GET(self):
+        # Handle Discord OAuth Redirect: http://localhost:PORT/?code=XYZ
+        from urllib.parse import urlparse, parse_qs
+        query = urlparse(self.path).query
+        params = parse_qs(query)
+        
+        if 'code' in params:
+            code = params['code'][0]
+            extension_storage.set_discord_code(code)
+            
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html')
+            self.end_headers()
+            self.wfile.write(b"<html><body style='background:#1f1f1f;color:white;font-family:sans-serif;text-align:center;padding-top:50px;'>")
+            self.wfile.write(b"<h1>Discord Connected!</h1><p>You can close this window and go back to OLED Customizer.</p></body></html>")
+        else:
+            self.send_response(404)
+            self.end_headers()
+
     def do_OPTIONS(self):
         # Handle CORS preflight
         self.send_response(204)
@@ -94,3 +128,6 @@ class ExtensionReceiver:
 
     def get_latest_data(self):
         return extension_storage.get_data()
+
+    def get_discord_code(self):
+        return extension_storage.consume_discord_code()
