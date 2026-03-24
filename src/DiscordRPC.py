@@ -14,8 +14,8 @@ import requests
 
 logger = logging.getLogger("OLED Customizer.DiscordRPC")
 
-# Default Application ID
-DEFAULT_CLIENT_ID = "1485778090104721550"
+# Do not embed any default Discord Application ID in source.
+DEFAULT_CLIENT_ID = ""
 
 class DiscordIPC:
     """IPC connection to Discord with OAuth AUTHORIZE/AUTHENTICATE support."""
@@ -23,6 +23,13 @@ class DiscordIPC:
     OP_HANDSHAKE = 0
     OP_FRAME = 1
     OP_CLOSE = 2
+
+    @staticmethod
+    def _mask_client_id(client_id):
+        raw = str(client_id or "").strip()
+        if len(raw) <= 6:
+            return "***" if raw else "(empty)"
+        return f"{raw[:3]}...{raw[-3:]}"
 
     def __init__(self, client_id=None, preferences=None, extension_receiver=None):
         self.client_id = str(client_id or DEFAULT_CLIENT_ID).strip()
@@ -40,13 +47,19 @@ class DiscordIPC:
     def set_client_id(self, client_id):
         new_id = str(client_id or DEFAULT_CLIENT_ID).strip()
         if new_id != self.client_id:
-            logger.info(f"Discord Client ID changed to {new_id} — reconnecting")
+            logger.info(
+                "Discord Client ID changed to %s — reconnecting",
+                self._mask_client_id(new_id),
+            )
             self.client_id = new_id
             self.close()
 
     def connect(self):
         if self.is_connected:
             return True
+        if not self.client_id:
+            logger.debug("Discord IPC connect skipped: Discord Application ID is empty")
+            return False
 
         for i in range(10):
             pipe_path = rf"\\.\pipe\discord-ipc-{i}"

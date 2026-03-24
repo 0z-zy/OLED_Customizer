@@ -116,16 +116,17 @@ class DisplayManager:
             preferences=self.user_preferences,
             extension_receiver=self.extension_receiver
         )
-        Thread(target=self._discord_rpc_loop, daemon=True, name="Discord-RPC").start()
-        
-        # HyperX HID Sync (Restored without Checkbox)
-        self._hid_listener = HIDListener(self.volume_overlay)
-        self._hid_listener.start()
+
         # Bi-directional sync tracking
+        self._hid_listener = None
         self._last_discord_state = None
         self._last_hw_state = None
         self._last_hw_event_ts = 0.0
         self._sync_lockout_until = 0
+        self._set_headset_hid_sync_enabled(
+            bool(self.user_preferences.get_preference("headset_hid_sync_enabled"))
+        )
+        Thread(target=self._discord_rpc_loop, daemon=True, name="Discord-RPC").start()
 
         now_ms = int(time() * 1000)
 
@@ -579,6 +580,34 @@ class DisplayManager:
 
     # ------------------------------------------------------------------
 
+    def _set_headset_hid_sync_enabled(self, enabled):
+        enabled = bool(enabled)
+        currently_enabled = self._hid_listener is not None
+        if enabled == currently_enabled:
+            return
+
+        # Re-align state machine whenever listener availability changes.
+        self._last_discord_state = None
+        self._last_hw_state = None
+        self._last_hw_event_ts = 0.0
+        self._sync_lockout_until = 0
+
+        if enabled:
+            try:
+                self._hid_listener = HIDListener(self.volume_overlay)
+                self._hid_listener.start()
+                logger.info("Headset HID sync enabled by preference")
+            except Exception as e:
+                self._hid_listener = None
+                logger.error("Failed to enable headset HID sync: %s", e)
+        else:
+            try:
+                self._hid_listener.stop()
+            except Exception as e:
+                logger.debug("Failed to stop HID listener cleanly: %s", e)
+            self._hid_listener = None
+            logger.info("Headset HID sync disabled by preference")
+
     def load_preferences(self):
         self.user_preferences.load_preferences()
         self.update_preferences()
@@ -624,6 +653,9 @@ class DisplayManager:
         discord_cid = self.user_preferences.get_preference("discord_client_id")
         if hasattr(self, "_discord_ipc"):
             self._discord_ipc.set_client_id(discord_cid)
+        self._set_headset_hid_sync_enabled(
+            self.user_preferences.get_preference("headset_hid_sync_enabled")
+        )
 
         self._spotify_poll_ms = max(250, int(self.fetch_delay * 1000))
         
@@ -1094,6 +1126,14 @@ class DisplayManager:
                 self._discord_ipc.close()
             except Exception:
                 pass
+
+        # Stop headset HID sync listener
+        if getattr(self, "_hid_listener", None):
+            try:
+                self._hid_listener.stop()
+            except Exception:
+                pass
+            self._hid_listener = None
 
         logger.info("DisplayManager shutdown complete")
 

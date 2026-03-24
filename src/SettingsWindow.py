@@ -329,6 +329,9 @@ class SettingsGUI:
         # Discord
         self.vars["discord_client_id"] = tk.StringVar(value=self.prefs.get_preference("discord_client_id") or "")
         self.vars["discord_client_secret"] = tk.StringVar(value=self.prefs.get_preference("discord_client_secret") or "")
+        self.vars["headset_hid_sync_enabled"] = tk.BooleanVar(
+            value=bool(self.prefs.get_preference("headset_hid_sync_enabled"))
+        )
 
     def _create_pages(self):
         # -- GENERAL PAGE --
@@ -445,6 +448,18 @@ class SettingsGUI:
         # Discord Section
         tk.Frame(p_adv, bg=Colors.CONTENT, height=10).pack()
         self._header(p_adv, "🎙️ Discord Mic Detection")
+        self._toggle_row(
+            p_adv,
+            "Enable Headset HID Sync (Experimental)",
+            self.vars["headset_hid_sync_enabled"],
+        )
+        tk.Label(
+            p_adv,
+            text="   Off by default. Turn on only if your headset button/LED sync is supported.",
+            font=FONT_SMALL,
+            fg=Colors.TEXT_DIM,
+            bg=Colors.CONTENT,
+        ).pack(anchor="w", pady=(0, 10))
         self._entry_row(p_adv, "Discord Application ID", self.vars["discord_client_id"], width=25)
         self._entry_row(p_adv, "Discord Client Secret", self.vars["discord_client_secret"], width=25, show="*")
         tk.Label(p_adv, text="   Required for mic detection authorization.", 
@@ -646,7 +661,6 @@ class SettingsGUI:
 
     def _authorize_discord_action(self):
         """Action for 'Connect Discord' button"""
-        from src.DiscordRPC import DiscordIPC
         import webbrowser
         
         # Save current ID/Secret first
@@ -665,7 +679,7 @@ class SettingsGUI:
         
         # Open browser for OAuth
         url = f"https://discord.com/api/oauth2/authorize?client_id={cid}&redirect_uri={redirect_uri}&response_type=code&scope=rpc%20rpc.voice.read%20rpc.voice.write"
-        logger.info(f"Opening browser for Discord Auth: {url}")
+        logger.info("Opening browser for Discord Auth flow on localhost redirect port %s", port)
         webbrowser.open(url)
         
         messagebox.showinfo("Authorization", "Please check your browser to authorize Discord, then wait for the 'Connected' status in this window.", parent=self.root)
@@ -938,9 +952,11 @@ class SettingsGUI:
     def _save_all(self):
         try:
             # Gather all vars
+            sensitive_keys = {"discord_client_id", "discord_client_secret", "discord_access_token"}
             for k, v in self.vars.items():
                 val = v.get()
-                logger.info(f"Saving {k}: {val}")
+                log_val = "***" if k in sensitive_keys else val
+                logger.info("Saving %s: %s", k, log_val)
                 
                 if k in ["scrollbar_padding", "text_padding_left", "local_port", "discord_local_port", "spotify_fetch_delay"]:
                     try: val = int(val)

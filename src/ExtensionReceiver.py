@@ -28,7 +28,7 @@ class ExtensionData:
     def set_discord_code(self, code):
         with self._lock:
             self.discord_code = code
-            logger.info(f"Captured Discord Auth Code: {code[:10]}...")
+            logger.info("Captured Discord Auth Code from localhost callback")
 
     def consume_discord_code(self):
         with self._lock:

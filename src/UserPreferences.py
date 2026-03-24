@@ -47,6 +47,7 @@ class UserPreferences:
         "discord_client_id": "",
         "discord_client_secret": "",
         "discord_access_token": "",
+        "headset_hid_sync_enabled": False,
         "local_port": 2408,
         "discord_local_port": 8888
     }
