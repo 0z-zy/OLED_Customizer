@@ -1207,12 +1207,6 @@ class DisplayManager:
         """
         logger.info("Discord RPC poll thread started")
         
-        try:
-            import pythoncom
-            pythoncom.CoInitialize()
-        except Exception:
-            pass
-
         while self._running:
             try:
                 # Try to connect if not already connected
@@ -1238,7 +1232,7 @@ class DisplayManager:
                     # --- BI-DIRECTIONAL SYNC LOGIC ---
                     new_discord_mute = bool(voice["mute"] or voice["deaf"])
                     new_hw_mute = self._hid_listener._last_state if self._hid_listener else None
-                    new_hw_event_ts = self._hid_listener._last_hw_ts if self._hid_listener else 0.0
+                    new_hw_event_ts = self._hid_listener._last_state_ts if self._hid_listener else 0.0
                     now = time()
 
                     # --- PHASE 1: INITIAL ALIGNMENT ---
@@ -1325,7 +1319,7 @@ class DisplayManager:
                     self._last_discord_state = None # Reset for re-sync on reconnect
                     sleep(2)
 
-                sleep(0.1)
+                sleep(0.5)
                 
             except Exception as e:
                 logger.debug(f"Discord RPC loop error: {e}")

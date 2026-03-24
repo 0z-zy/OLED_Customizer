@@ -1,6 +1,7 @@
 import logging
 import pythoncom
 import os
+import gc
 from time import time
 
 from PIL import Image, ImageDraw
@@ -107,6 +108,8 @@ class VolumeOverlay:
                 
     def _set_mic_mute_on_device(self, device, new_state):
         """Helper to set mute on a single device, returns success"""
+        interface = None
+        volume = None
         try:
             from pycaw.pycaw import IAudioEndpointVolume
             from comtypes import CLSCTX_ALL
@@ -117,27 +120,16 @@ class VolumeOverlay:
         except Exception:
             return False
         finally:
-            if 'interface' in locals() and interface:
-                try:
-                    import ctypes
-                    # We don't CoUninitialize here as it might be called from within a loop
-                    pass
-                except:
-                    pass
+            # Drop COM refs immediately so caller can CoUninitialize safely.
+            volume = None
+            interface = None
 
     def _sync_all_capture_mics(self, muted, source="Sync"):
         """Set mute on all active capture devices. Returns True if at least one device was updated."""
-        import ctypes
         success_count = 0
         total_count = 0
-        coinit_done = False
-
-        try:
-            ctypes.windll.ole32.CoInitialize(None)
-            coinit_done = True
-        except Exception:
-            pass
-
+        # COM is now initialized at the thread level in DisplayManager._discord_rpc_loop,
+        # so we don't need to open/close it here (which causes comtypes VTable errors).
         try:
             import comtypes
             from comtypes import CLSCTX_ALL, GUID
@@ -155,14 +147,18 @@ class VolumeOverlay:
                 dev = collection.Item(i)
                 if self._set_mic_mute_on_device(dev, muted):
                     success_count += 1
+                dev = None
         except Exception as e:
             logger.debug("%s all-capture sync failed: %s", source, e)
         finally:
-            if coinit_done:
-                try:
-                    ctypes.windll.ole32.CoUninitialize()
-                except Exception:
-                    pass
+            # Release COM wrappers. comtypes will clean these up when the thread/apartment eventually closes.
+            dev = None
+            collection = None
+            enumerator = None
+            try:
+                gc.collect()
+            except Exception:
+                pass
 
         if success_count > 0:
             self._last_mic_mute = muted
@@ -237,9 +233,16 @@ class VolumeOverlay:
             return
         
         # --- LEGACY FALLBACK: System mic mute when Discord is NOT running ---
-        import ctypes
+        coinit_done = False
+        default_mic = None
+        interface = None
+        mic_volume = None
+        enumerator = None
+        collection = None
+        dev = None
         try:
-            ctypes.windll.ole32.CoInitialize(None)
+            pythoncom.CoInitialize()
+            coinit_done = True
         except Exception:
             pass
 
@@ -290,6 +293,7 @@ class VolumeOverlay:
                             dev = collection.Item(i)
                             if self._set_mic_mute_on_device(dev, target_mute_state):
                                 success_count += 1
+                            dev = None
                         
                         if success_count > 0:
                             self._last_mic_mute = target_mute_state
@@ -303,11 +307,24 @@ class VolumeOverlay:
             except Exception as e:
                 logger.warning(f"System mic control failed: {e}")
         finally:
-            # CRITICAL: Always uninitialize COM to prevent handle leaks over long runtimes
+            # Release COM wrappers before uninitializing apartment.
+            dev = None
+            collection = None
+            enumerator = None
+            mic_volume = None
+            interface = None
+            default_mic = None
+            # Flush cyclic COM wrappers before CoUninitialize.
             try:
-                ctypes.windll.ole32.CoUninitialize()
+                gc.collect()
             except Exception:
                 pass
+            # CRITICAL: Always uninitialize COM to prevent handle leaks over long runtimes
+            if coinit_done:
+                try:
+                    pythoncom.CoUninitialize()
+                except Exception:
+                    pass
 
         # Fallback: Overlay Only
         if self._last_mic_mute is None: self._last_mic_mute = False

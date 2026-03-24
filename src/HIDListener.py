@@ -62,7 +62,10 @@ class HIDListener(threading.Thread):
         self.device_path = None
         self._running = False
         self._last_state = None
-        self._last_state_ts = 0.0
+        self._last_hw_ts = 0.0      # time of last physical/accepted report
+        self._last_write_ts = 0.0   # time of last host-originated write
+        self._suppress_until = 0.0  # silence initial chatter
+        self._latched_profile_index = None  # Sticky index of working HID profile
         self._lock = threading.Lock()
         self._handle = None
         # Col05 advertises output caps for both report IDs 0x0C and 0x0D.
@@ -269,15 +272,19 @@ class HIDListener(threading.Thread):
 
     def set_hardware_mute(self, is_muted):
         """Request hardware mute change."""
-        t = threading.Thread(target=self._do_hardware_mute, args=(is_muted,))
+        issued_at = time()
+        t = threading.Thread(target=self._do_hardware_mute, args=(is_muted, issued_at))
         t.daemon = True
         t.start()
 
-    def _do_hardware_mute(self, is_muted):
+    def _do_hardware_mute(self, is_muted, issued_at=None):
         """
         Write mute command to headset.
         Strategy: Use a completely separate handle for writing.
         """
+        if issued_at is None:
+            issued_at = time()
+
         # Try to find device path if not available
         if not self.device_path:
             self.device_path = self.find_device_path()
@@ -339,13 +346,49 @@ class HIDListener(threading.Thread):
         logger.debug("HID Sync: Write handle opened successfully (%s)", open_mode_used)
 
         try:
-            logger.info("HID Sync: Sending mute=%s to headset", is_muted)
+            # Guard against stale host writes arriving after a newer physical button event.
+            with self._lock:
+                latest_hw_state = self._last_state
+                latest_hw_ts = self._last_hw_ts
+            if (
+                latest_hw_state is not None
+                and latest_hw_ts > issued_at
+                and latest_hw_state != is_muted
+            ):
+                logger.info(
+                    "HID Sync: Skipping stale write mute=%s (newer hardware state=%s)",
+                    is_muted,
+                    latest_hw_state,
+                )
+                return False
 
+            # Update current knowledge of state BEFORE we start the long pulsatile write loop.
+            # This ensures that any incoming HID reports (the "echo" from the headset)
+            # are correctly identified as flutter/known-state and ignored by the debounce.
+            with self._lock:
+                # If we ALREADY think the hardware is in the desired state,
+                # skip the long write cycle entirely to avoid firmware overwhelm/loops.
+                if self._last_state == is_muted:
+                    logger.debug("HID Sync: Hardware already in state %s, skipping write", is_muted)
+                    return True
+
+                if self._last_hw_ts <= issued_at:
+                    self._last_state = is_muted
+                    self._last_write_ts = time()
+
+            logger.info("HID Sync: Sending mute=%s to headset", is_muted)
             state_byte = 0x01 if is_muted else 0x00
             write_success = 0
             output_success = 0
 
-            for report_id, b3, b4 in self._output_profiles:
+            # Profile Latching Logic:
+            # If we already have a latched index, try it first.
+            profiles_to_try = self._output_profiles
+            if self._latched_profile_index is not None:
+                idx = self._latched_profile_index
+                profiles_to_try = [self._output_profiles[idx]] + [p for i, p in enumerate(self._output_profiles) if i != idx]
+
+            for idx_in_subset, (report_id, b3, b4) in enumerate(profiles_to_try):
                 report = bytearray(64)
                 report[0] = report_id
                 report[1] = 0x02
@@ -354,72 +397,31 @@ class HIDListener(threading.Thread):
                 report[4] = b4
                 report[5] = state_byte
 
-                # NUCLEAR PULSE: Send 3 times with small delays (WriteFile path)
-                for pulse in range(3):
-                    bytes_written = wintypes.DWORD(0)
-                    result = WriteFile(write_handle, bytes(report), 64, ctypes.byref(bytes_written), None)
-                    if result:
-                        write_success += 1
-                        logger.debug(
-                            "HID Write profile RID=%02X b3=%02X b4=%02X pulse %s/3: success",
-                            report_id,
-                            b3,
-                            b4,
-                            pulse + 1,
-                        )
-                    else:
-                        logger.debug(
-                            "HID Write profile RID=%02X b3=%02X b4=%02X pulse %s/3: failed, err=%s",
-                            report_id,
-                            b3,
-                            b4,
-                            pulse + 1,
-                            ctypes.get_last_error(),
-                        )
-                    sleep(0.02)
+                # Send exactly one pulse per profile (WriteFile path)
+                bytes_written = wintypes.DWORD(0)
+                if WriteFile(write_handle, bytes(report), 64, ctypes.byref(bytes_written), None):
+                    write_success = 1
+                else:
+                    # Try HidD_SetOutputReport only if WriteFile failed
+                    out_buf = (ctypes.c_ubyte * 64)()
+                    for idx_buf in range(6): out_buf[idx_buf] = report[idx_buf]
+                    if HidD_SetOutputReport(write_handle, ctypes.byref(out_buf), 64):
+                        output_success = 1
 
-                # Some HID firmwares ignore WriteFile but accept HidD_SetOutputReport.
-                # Try both 64-byte and 6-byte output reports.
-                for out_len in (64, 6):
-                    out_buf = (ctypes.c_ubyte * out_len)()
-                    out_buf[0] = report_id
-                    out_buf[1] = 0x02
-                    out_buf[2] = 0x03
-                    out_buf[3] = b3
-                    out_buf[4] = b4
-                    out_buf[5] = state_byte
-                    if HidD_SetOutputReport(write_handle, ctypes.byref(out_buf), out_len):
-                        output_success += 1
-                        logger.debug(
-                            "HID OutputReport profile RID=%02X b3=%02X b4=%02X (%s bytes): success",
-                            report_id,
-                            b3,
-                            b4,
-                            out_len,
-                        )
-                    else:
-                        logger.debug(
-                            "HID OutputReport profile RID=%02X b3=%02X b4=%02X (%s bytes): failed, err=%s",
-                            report_id,
-                            b3,
-                            b4,
-                            out_len,
-                            ctypes.get_last_error(),
-                        )
+                if (write_success + output_success) > 0:
+                    # LATCH SUCCESS: If this was a new discovery, save it.
+                    if self._latched_profile_index is None:
+                        # Find the actual original index
+                        for orig_idx, p in enumerate(self._output_profiles):
+                            if p == (report_id, b3, b4):
+                                self._latched_profile_index = orig_idx
+                                logger.info("HID Sync: Profile latched to index %s (RID=%02X)", orig_idx, report_id)
+                                break
+                    # STOP: Don't send to other profiles. Sending to multiple (e.g. 0x0D and 0x0C)
+                    # can trigger a "double-tap" toggle in firmware, starting a loop.
+                    break
 
-            total_success = write_success + output_success
-            if total_success > 0:
-                # Reflect commanded state locally so sync logic stays aligned
-                # even if firmware does not echo a report for host-originated writes.
-                self._last_state = is_muted
-                self._last_state_ts = time()
-                logger.info(
-                    "HID Sync: Success mode=%s (WriteFile=%s, OutputReport=%s, profiles=%s)",
-                    open_mode_used,
-                    write_success,
-                    output_success,
-                    len(self._output_profiles),
-                )
+            if (write_success + output_success) > 0:
                 return True
             else:
                 logger.warning("HID Sync: All write methods failed")
@@ -499,10 +501,28 @@ class HIDListener(threading.Thread):
                     if len(data) >= 6 and data[0] in (0x0C, 0x0D) and data[1:3] == b'\x02\x03':
                         is_muted = (data[5] == 0x01)
                         if is_muted != self._last_state:
-                            logger.info("Cloud III Hardware/Button Report: Muted=%s (raw=%s)", is_muted, data[:6].hex())
-                            self.volume_overlay.set_mic_mute_from_hardware(is_muted)
+                            now = time()
+                            
+                            # 0. Initial Sync Settle: Ignore reports during startup/connection flurry
+                            if now < self._suppress_until:
+                                logger.debug("HID Debounce: Ignoring initial connection chatter -> Muted=%s", is_muted)
+                                continue
+
+                            # 1. Flutter Debounce: Ignore consecutive HW reports within 600ms
+                            if (now - self._last_hw_ts) < 0.6:
+                                logger.debug("HID Debounce: Ignoring hardware flutter (600ms) -> Muted=%s", is_muted)
+                                continue
+
+                            # 2. Echo Debounce: Ignore reports that closely follow a host command (1200ms)
+                            if (now - self._last_write_ts) < 1.2:
+                                logger.debug("HID Debounce: Ignoring command echo (1200ms) -> Muted=%s", is_muted)
+                                continue
+
+                            # Update trackers - DisplayManager's RPC loop will pick this up
+                            # and handle the master sync (OLED + Discord + System Mic).
                             self._last_state = is_muted
-                            self._last_state_ts = time()
+                            self._last_hw_ts = now
+                            logger.info("Cloud III Hardware/Button Report: Muted=%s (raw=%s)", is_muted, data[:6].hex())
 
             except Exception as e:
                 logger.debug("HID Listen error: %s", e)
