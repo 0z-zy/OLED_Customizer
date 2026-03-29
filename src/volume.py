@@ -397,8 +397,9 @@ class VolumeOverlay:
                 except Exception:
                     self._volume = None
                 
-        # Check Mic
-        if self._mic_volume:
+        # Check Mic -- skip when Discord is connected (it is the source of truth;
+        # polling here would echo-detect our own _sync_all_capture_mics writes)
+        if self._mic_volume and not self._discord_connected:
             try:
                 mic_mute = bool(self._mic_volume.GetMute())
                 if self._last_mic_mute is None:

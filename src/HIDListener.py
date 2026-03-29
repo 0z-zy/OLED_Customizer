@@ -459,6 +459,8 @@ class HIDListener(threading.Thread):
 
                     if self._handle != INVALID_HANDLE_VALUE:
                         logger.info("Cloud III HID: Connected for reading")
+                        # 0. Initial Sync Settle: Ignore reports during startup/connection flurry for 2 seconds
+                        self._suppress_until = time() + 2.0
                         reconnect_delay = 1
                     else:
                         logger.debug("HID Discovery: Read handle open failed, err=%s", ctypes.get_last_error())
@@ -500,20 +502,30 @@ class HIDListener(threading.Thread):
 
                     if len(data) >= 6 and data[0] in (0x0C, 0x0D) and data[1:3] == b'\x02\x03':
                         is_muted = (data[5] == 0x01)
+                        now = time()
+                        
+                        # 0. Baseline Initialization: If this is the VERY FIRST report, 
+                        # capture it as the current state but DO NOT update the timestamp 
+                        # so DisplayManager doesn't see it as an 'event'.
+                        if self._last_state is None:
+                            self._last_state = is_muted
+                            logger.info("Cloud III HID: Established baseline hardware state muted=%s", is_muted)
+                            continue
+
                         if is_muted != self._last_state:
-                            now = time()
-                            
-                            # 0. Initial Sync Settle: Ignore reports during startup/connection flurry
+                            # 1. Initial Sync Settle: Ignore reports during startup/connection flurry
                             if now < self._suppress_until:
                                 logger.debug("HID Debounce: Ignoring initial connection chatter -> Muted=%s", is_muted)
+                                # Still update the state baseline so we don't 'jump' later
+                                self._last_state = is_muted
                                 continue
 
-                            # 1. Flutter Debounce: Ignore consecutive HW reports within 150ms
+                            # 2. Flutter Debounce: Ignore consecutive HW reports within 150ms
                             if (now - self._last_hw_ts) < 0.15:
                                 logger.debug("HID Debounce: Ignoring hardware flutter (150ms) -> Muted=%s", is_muted)
                                 continue
 
-                            # 2. Echo Debounce: Ignore reports that closely follow a host command (400ms)
+                            # 3. Echo Debounce: Ignore reports that closely follow a host command (400ms)
                             if (now - self._last_write_ts) < 0.4:
                                 logger.debug("HID Debounce: Ignoring command echo (400ms) -> Muted=%s", is_muted)
                                 continue

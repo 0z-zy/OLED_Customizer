@@ -39,6 +39,7 @@ class DiscordIPC:
         self._connected = False
         self._authenticated = False
         self._last_voice_state = {"mute": False, "deaf": False}
+        self._last_poll_time = 0  # Throttle GET_VOICE_SETTINGS polls
 
     @property
     def is_connected(self):
@@ -250,18 +251,21 @@ class DiscordIPC:
                     "deaf": bool(data.get("deaf", False))
                 }
 
-        # 3) If authenticated, explicitly poll once in a while to be sure
-        # (Though VOICE_SETTINGS_UPDATE handles it mostly)
+        # 3) If authenticated, poll as a safety net every 5s
+        # (VOICE_SETTINGS_UPDATE subscription handles real-time changes)
         if self._authenticated:
-            try:
-                self._send(self.OP_FRAME, {
-                    "cmd": "GET_VOICE_SETTINGS",
-                    "args": {},
-                    "nonce": str(uuid.uuid4())
-                })
-            except Exception:
-                self.close()
-                return None
+            now = time.time()
+            if now - self._last_poll_time >= 5.0:
+                self._last_poll_time = now
+                try:
+                    self._send(self.OP_FRAME, {
+                        "cmd": "GET_VOICE_SETTINGS",
+                        "args": {},
+                        "nonce": str(uuid.uuid4())
+                    })
+                except Exception:
+                    self.close()
+                    return None
 
         return self._last_voice_state
 

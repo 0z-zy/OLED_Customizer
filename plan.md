@@ -2,6 +2,63 @@
 
 ---
 
+## Plan: Deep Mute Sync Stability & Jitter Fixes
+
+**Date:** 2026-03-29 13:00
+
+### Problem
+
+1. **Power-on Mute:** Headset sends a "muted" signal (or is interpreted as one) immediately upon powering on, forcing Discord to mute even if not in a VC.
+2. **Phantom Mute (Movies):** Brief Discord RPC connection jitters cause the app to "reset" the sync state, triggering a spontaneous re-alignment that can flip the mute state.
+
+### Solution (Stability & Patience)
+
+| Feature | Fix |
+|---------|-----|
+| Power-on Suppression | Ignore HID reports for 2.0s after connection to let firmware settle. |
+| Baseline Initialization | Establish `_last_state` from the first report *without* triggering a "button press" event. |
+| RPC Jitter Tolerance | Keep `_last_discord_state` for 10s after a disconnect; don't "panic-reset" on brief flickers. |
+| Lazy Alignment | On RPC reconnect, only force a sync if the state is ACTUALLY different from our 10-second memory. |
+| Reconnect Lockout | Disable HW->Discord sync for 2.0s after any reconnection to let chatter settle. |
+
+### Files to Change
+
+- `src/HIDListener.py` — Add `_suppress_until` logic and baseline initialization.
+- `src/DisplayManager.py` — Implement Lazy Alignment and Jitter Persistence.
+- `src/DiscordRPC.py` — Minor robustness tweaks to message draining.
+
+---
+
+## Plan: Fix Phantom/Random Mute State Changes
+
+**Date:** 2026-03-26 02:40
+
+### Problem
+
+Mute state randomly flips without user interaction. App was creating a feedback loop — writing to system mics, then detecting its own write as a new event, triggering another sync cycle.
+
+### Root Causes
+
+1. `volume.py` `update()` polled system mic every frame — detected its own `_sync_all_capture_mics()` writes as new events.
+2. `DisplayManager.py` steady-state branch called `set_discord_mute()` every 100ms, which triggered mic sync even when nothing changed.
+3. `DiscordRPC.py` sent `GET_VOICE_SETTINGS` every 100ms. Stale responses caused phantom state flips.
+
+### Solution (Event-Driven, No Timers)
+
+| Problem | Fix |
+|---------|-----|
+| Echo detection in `update()` | Skip mic poll when Discord is connected |
+| Steady-state mic sync spam | Update display vars directly, skip `set_discord_mute()` |
+| Aggressive Discord polling | Throttle poll to 1x/5sec, rely on subscription events |
+
+### Files Changed
+
+- `src/volume.py` — Added `not self._discord_connected` guard to mic poll section
+- `src/DisplayManager.py` — Steady-state sets overlay vars directly; poll loop slowed to 500ms
+- `src/DiscordRPC.py` — Added `_last_poll_time` tracker, polls every 5s instead of every call
+
+---
+
 ## Plan: Fix Rapid Mute Toggle Not Registering on Discord
 
 **Date:** 2026-03-25 02:39
