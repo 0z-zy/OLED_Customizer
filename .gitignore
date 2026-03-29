@@ -12,6 +12,14 @@ dist/
 build/
 *.exe
 
+# Lite Version (Experimental)
+/lite/
+
+# Local Plans & Notes (Private)
+*.md
+!README.md
+!GH release manual.md
+
 # Except the main executables
 !OLED-Customizer.exe
 !OLED-Customizer.spec
@@ -23,7 +31,6 @@ credentials.json
 yt_nowplaying.json
 *.pem
 *.crx
-!GH release manual.md
 .lock
 debug_fs.txt
 build.ps1
