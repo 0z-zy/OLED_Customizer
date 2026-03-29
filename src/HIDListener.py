@@ -56,7 +56,7 @@ INVALID_HANDLE_VALUE = wintypes.HANDLE(-1).value
 DEVICE_MARKERS = ("VID_03F0", "VID_0951", "HYPERX", "CLOUD")
 
 class HIDListener(threading.Thread):
-    def __init__(self, volume_overlay):
+    def __init__(self, volume_overlay=None):
         super().__init__(daemon=True, name="HIDListener")
         self.volume_overlay = volume_overlay
         self.device_path = None

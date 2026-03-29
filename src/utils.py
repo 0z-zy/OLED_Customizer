@@ -2,8 +2,6 @@ import os
 from os import path, getenv
 import winreg
 import sys
-import psutil
-
 import logging
 
 logger = logging.getLogger("OLED Customizer.Utils")
@@ -133,6 +131,7 @@ def is_process_running(process_names):
     """
     Check if any of the given process names are running.
     """
+    import psutil
     if isinstance(process_names, str):
         process_names = [process_names]
         

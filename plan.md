@@ -2,6 +2,34 @@
 
 ---
 
+## Plan: Configurable Discord RPC Port and host (Lite)
+
+**Date:** 2026-03-29 15:30
+
+### Problem
+
+Users with custom Discord Application IDs often need to use a specific `redirect_uri` (e.g. `http://localhost:9000` instead of `http://127.0.0.1:8888`). The current Lite edition has these values hardcoded, making it impossible to sync with certain Discord apps.
+
+### Solution
+
+| Feature | Fix |
+|---------|-----|
+| Configurable Port | Add `discord_local_port` to `lite_config.json` and UI. |
+| Configurable Host | Add `discord_redirect_host` to `lite_config.json` and UI. |
+| Dynamic Auth URL | Generate the Discord Login URL using these settings. |
+| Dynamic RPC exchange | Use the configured host/port when exchanging the auth code for a token. |
+
+### Files to Change
+
+- `lite/lite_config.json` — Add new fields.
+- `lite/main.py` — Load new fields.
+- `lite/SyncManager.py` — Pass fields to sub-components.
+- `lite/SettingsUI.py` — Add UI inputs and update Login logic.
+- `src/DiscordRPC.py` — Use dynamic host/port for token exchange.
+- `src/ExtensionReceiver.py` — Allow host binding.
+
+---
+
 ## Plan: Deep Mute Sync Stability & Jitter Fixes
 
 **Date:** 2026-03-29 13:00
