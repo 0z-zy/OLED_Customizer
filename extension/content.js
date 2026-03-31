@@ -4,6 +4,7 @@
  */
 
 let lastSentData = null;
+const TAB_ID = Math.random().toString(36).substr(2, 9);
 
 function getActiveVideo() {
     const videos = Array.from(document.querySelectorAll('video'));
@@ -39,37 +40,55 @@ function getActiveVideo() {
     return bestVideo || videos[0];
 }
 
+let lastGoodMetadata = {}; // { videoId: {title, artist} }
+
+function getYouTubeVideoId() {
+    const url = new URL(window.location.href);
+    if (url.pathname.startsWith('/shorts/')) return url.pathname.split('/')[2];
+    return url.searchParams.get('v');
+}
+
 function scrapeMediaInfo() {
     const video = getActiveVideo();
     if (!video) return null;
 
-    // Site-specific logic (currently YouTube)
+    const videoId = getYouTubeVideoId() || "unknown_video";
     let title = "";
     let artist = "";
 
     if (window.location.host.includes('youtube.com')) {
-        if (window.location.pathname.startsWith('/shorts/')) {
-            // YouTube Shorts Title & Artist
-            const activeReel = document.querySelector('ytd-reel-video-renderer[is-active]');
-            if (activeReel) {
-                const titleEl = activeReel.querySelector('h2.title yt-formatted-string');
-                title = titleEl ? titleEl.innerText : document.title.replace(" - YouTube", "");
+        // 1. Try Meta Tags (Most stable, works in background)
+        const metaTitle = document.querySelector('meta[name="title"]') || document.querySelector('meta[property="og:title"]');
+        const metaArtist = document.querySelector('meta[name="author"]') || document.querySelector('link[itemprop="name"]');
+        
+        title = metaTitle ? (metaTitle.content || "").trim() : "";
+        artist = metaArtist ? (metaArtist.content || metaArtist.getAttribute('content') || "").trim() : "";
 
-                const channelEl = activeReel.querySelector('#channel-name a') || activeReel.querySelector('ytd-channel-name a');
-                artist = channelEl ? channelEl.innerText : "YouTube Shorts";
+        // 2. Fallbacks
+        if (!title || title.length < 2) {
+            title = document.title.replace(" - YouTube", "").trim();
+        }
+        
+        // Remove notification counts like (1) from title
+        title = title.replace(/^\(\d+\)\s*/, "");
+
+        if (!artist || artist.length < 2) {
+            // Shorts Specific Artist
+            if (window.location.pathname.startsWith('/shorts/')) {
+                const channelEl = document.querySelector('ytd-reel-video-renderer[is-active] #channel-name a') || 
+                                 document.querySelector('ytd-reel-video-renderer[is-active] ytd-channel-name a');
+                artist = channelEl ? (channelEl.textContent || "").trim() : "YouTube Shorts";
+            } else {
+                artist = "YouTube Video";
             }
-        } else {
-            // Normal YouTube Title - More robust selectors
-            const titleEl = document.querySelector('h1.ytd-video-primary-info-renderer yc-video-title') ||
-                document.querySelector('ytd-watch-metadata h1') ||
-                document.querySelector('.ytp-title-link');
-            title = titleEl ? titleEl.innerText : document.title.replace(" - YouTube", "");
+        }
 
-            // Normal YouTube Channel (Artist)
-            const channelEl = document.querySelector('ytd-video-owner-renderer #channel-name a') ||
-                document.querySelector('#upload-info #channel-name a') ||
-                document.querySelector('.ytp-ce-channel-title');
-            artist = channelEl ? channelEl.innerText : "YouTube Video";
+        // 3. Persistent Memory (Lock in the title if it's currently 'Unknown' but we knew it before)
+        if (title && title !== "Unknown Title" && artist && artist !== "Unknown Artist") {
+            lastGoodMetadata[videoId] = { title, artist };
+        } else if (lastGoodMetadata[videoId]) {
+            title = lastGoodMetadata[videoId].title;
+            artist = lastGoodMetadata[videoId].artist;
         }
     }
 
@@ -79,7 +98,10 @@ function scrapeMediaInfo() {
         duration: video.duration || 0,
         progress: video.currentTime || 0,
         playing: !video.paused,
-        source: "YouTube (Extension)"
+        isFocused: document.visibilityState === 'visible',
+        source: "YouTube (Extension)",
+        tabId: TAB_ID,
+        videoId: videoId
     };
 }
 
@@ -97,15 +119,10 @@ async function sendData() {
 
     if (dataString !== lastDataString || !lastSentData || playingChanged || (Math.abs(data.progress - lastSentData.progress) >= 2)) {
         try {
-            await fetch('http://127.0.0.1:8888/extension_data', {
-                method: 'POST',
-                mode: 'no-cors',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            });
+            chrome.runtime.sendMessage({ action: 'sendMediaData', data: data });
             lastSentData = data;
         } catch (e) {
-            // Silently fail if app isn't running
+            // Silently fail if extension context is invalidated
         }
     }
 }
@@ -113,9 +130,21 @@ async function sendData() {
 // Start polling
 setInterval(sendData, 500);
 
-// Event Listeners for immediate updates
 document.addEventListener('play', sendData, true);
 document.addEventListener('pause', sendData, true);
 document.addEventListener('seeked', sendData, true);
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' || document.visibilityState === 'visible') {
+        sendData();
+    }
+}, true);
 
-console.log("OLED Customizer Extension Active (Low Latency Mode)");
+window.addEventListener('beforeunload', () => {
+    const data = scrapeMediaInfo();
+    if (data) {
+        data.playing = false;
+        chrome.runtime.sendMessage({ action: 'sendMediaData', data: data });
+    }
+});
+
+console.log("OLED Customizer Extension Active (Multi-Tab Mode)");

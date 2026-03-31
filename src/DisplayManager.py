@@ -122,7 +122,6 @@ class DisplayManager:
         self._last_discord_state = None
         self._last_hw_state = None
         self._last_hw_event_ts = 0.0
-        self._sync_lockout_until = 0
         self._discord_disconnect_ts = 0.0
         self._set_headset_hid_sync_enabled(
             bool(self.user_preferences.get_preference("headset_hid_sync_enabled"))
@@ -764,11 +763,8 @@ class DisplayManager:
                 prog = int(ext_data.get("progress") * 1000)
                 dur = int(ext_data.get("duration") * 1000)
                 
-                # If SMTC is reporting a valid duration, let it override the extension
-                if smtc_fb.get("duration", -1) > 0:
-                    prog = smtc_fb.get("progress", prog)
-                    dur = smtc_fb.get("duration", dur)
-                    is_playing = not bool(smtc_fb.get("paused", not is_playing))
+                # Never let SMTC override extension timing or play state.
+                # The browser extension holds the absolute source of truth.
                 
                 payload = {
                     "title": ext_data.get("title") or smtc_fb.get("title"),
@@ -1259,100 +1255,54 @@ class DisplayManager:
                 voice = self._discord_ipc.get_voice_settings()
                 
                 if voice:
-                    # --- BI-DIRECTIONAL SYNC LOGIC ---
+                    # --- DIRECT EVENT-BASED SYNC LOGIC ---
                     new_discord_mute = bool(voice["mute"] or voice["deaf"])
                     new_hw_mute = self._hid_listener._last_state if self._hid_listener else None
                     new_hw_event_ts = self._hid_listener._last_hw_ts if self._hid_listener else 0.0
-                    now = time()
-
-                    # --- PHASE 1: INITIAL ALIGNMENT / JITTER RECOVERY ---
-                    # If we just connected (or just reset), align baseline states.
-                    if self._last_discord_state is None:
-                        # DELAYED ALIGNMENT: If the headset just connected, wait 2 seconds 
-                        # before doing the first sync to avoid startup "click-clack" noise.
-                        if self._hid_listener and now < self._hid_listener._suppress_until:
-                            continue
-
-                        logger.info(f"Initial Discord Alignment: Discord Muted={new_discord_mute}")
+                    
+                    # 1. Did Discord change?
+                    if new_discord_mute != self._last_discord_state:
+                        logger.info(f"Discord Event: Muted={new_discord_mute}")
                         self._last_discord_state = new_discord_mute
-                        self._last_hw_state = new_discord_mute 
+                        self._last_hw_state = new_discord_mute
                         self._last_hw_event_ts = new_hw_event_ts
-                        self._sync_lockout_until = now + 1.0
-                        
-                        # LAZY SYNC: Only force the headset if it doesn't match Discord yet.
-                        if self._hid_listener and new_hw_mute != new_discord_mute:
-                            logger.info(f"Applying baseline sync to headset: {new_discord_mute}")
-                            self._hid_listener.set_hardware_mute(new_discord_mute)
                         
                         self.volume_overlay.set_discord_mute(voice["mute"], voice["deaf"], True)
-                        continue
-
-                    # --- PHASE 2: EVENT DETECTION ---
-                    
-                    # 1. Did Discord change? (User clicked Discord UI)
-                    if new_discord_mute != self._last_discord_state:
-                        if now > self._sync_lockout_until:
-                            logger.info(f"Discord UI Change detected: {self._last_discord_state} -> {new_discord_mute}")
+                        if self._hid_listener:
+                            self._hid_listener.set_hardware_mute(new_discord_mute)
                             
-                            self._last_discord_state = new_discord_mute
-                            self._last_hw_state = new_discord_mute
-                            self._last_hw_event_ts = new_hw_event_ts
-                             
-                            # Update HEADSET LED
-                            if self._hid_listener:
-                                self._hid_listener.set_hardware_mute(new_discord_mute)
-                            
-                            self._sync_lockout_until = now + 0.8 # Slightly longer lockout for UI changes
-                             
-                            # Update Keyboard OLED + Windows System Mic
-                            self.volume_overlay.set_discord_mute(voice["mute"], voice["deaf"], True)
-                    
-                    # 2. Did Hardware change? (User pressed headset button)
+                    # 2. Did Hardware change?
                     elif (
                         new_hw_mute is not None
                         and new_hw_event_ts > self._last_hw_event_ts
                         and new_hw_mute != self._last_hw_state
                     ):
-                        if now > self._sync_lockout_until:
-                            logger.info(f"Hardware Button clicked: {self._last_hw_state} -> {new_hw_mute}")
-                             
-                            self._last_hw_state = new_hw_mute
-                            self._last_discord_state = new_hw_mute
-                            self._last_hw_event_ts = new_hw_event_ts
-                             
-                            # Push to Discord
-                            self._discord_ipc.set_mute(new_hw_mute)
-                             
-                            # LOCKOUT: Discord takes ~1s to update settings.
-                            self._sync_lockout_until = now + 0.8
-                             
-                            # Update Overlay (OLED + System Mic)
-                            self.volume_overlay.set_discord_mute(new_hw_mute, False, True)
-                        else:
-                            # Consume the transition timestamp so it doesn't trigger 
-                            # immediately after the lockout expires.
-                            self._last_hw_state = new_hw_mute
-                            self._last_hw_event_ts = new_hw_event_ts
-
+                        logger.info(f"Hardware Event: Muted={new_hw_mute}")
+                        self._last_hw_state = new_hw_mute
+                        self._last_discord_state = new_hw_mute
+                        self._last_hw_event_ts = new_hw_event_ts
+                        
+                        self.volume_overlay.set_discord_mute(new_hw_mute, False, True)
+                        self._discord_ipc.set_mute(new_hw_mute)
+                        
                     else:
-                        # 3. Steady State: Update display only.
-                        if now > self._sync_lockout_until:
-                            self._last_discord_state = new_discord_mute
-                            if new_hw_mute is not None:
-                                self._last_hw_state = new_hw_mute
-                            if new_hw_event_ts > self._last_hw_event_ts:
-                                self._last_hw_event_ts = new_hw_event_ts
-                             
-                            # Update overlay display vars directly (bypass mic sync)
-                            self.volume_overlay._discord_muted = voice["mute"]
-                            self.volume_overlay._discord_deafened = voice["deaf"]
-                            self.volume_overlay._discord_connected = True
+                        # 3. Steady State
+                        self._last_discord_state = new_discord_mute
+                        if new_hw_mute is not None:
+                            self._last_hw_state = new_hw_mute
+                        if new_hw_event_ts > self._last_hw_event_ts:
+                            self._last_hw_event_ts = new_hw_event_ts
+                            
+                        self.volume_overlay._discord_muted = voice["mute"]
+                        self.volume_overlay._discord_deafened = voice["deaf"]
+                        self.volume_overlay._discord_connected = True
 
                 else:
                     # Discord poll failed or pipe closed
                     if self._discord_disconnect_ts == 0.0:
                         self._discord_disconnect_ts = time()
                         logger.warning("Discord RPC pipe disconnected - initiating jitter bridge (10s)")
+
                     
                     if (time() - self._discord_disconnect_ts) > 10.0:
                         self.volume_overlay.set_discord_mute(None, None, False)
@@ -1361,7 +1311,7 @@ class DisplayManager:
                     self._discord_ipc.close()
                     sleep(2)
 
-                sleep(0.5)
+                sleep(0.1) # Faster poll loop! Changed from 0.5 to 0.1
                 
             except Exception as e:
                 logger.debug(f"Discord RPC loop error: {e}")

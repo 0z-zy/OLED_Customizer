@@ -497,10 +497,7 @@ class HIDListener(threading.Thread):
 
                 if bytes_read.value > 0:
                     data = bytes(read_buf.raw[:bytes_read.value])
-                    if len(data) >= 6 and data[0] in (0x0C, 0x0D):
-                        logger.debug("HID Report RID=%02x: %s (byte5=%02x)", data[0], data[:8].hex(), data[5])
-
-                    if len(data) >= 6 and data[0] in (0x0C, 0x0D) and data[1:3] == b'\x02\x03':
+                    if len(data) >= 6 and data[0] == 0x0D and data[1:3] == b'\x02\x03':
                         is_muted = (data[5] == 0x01)
                         now = time()
                         

@@ -1,4 +1,4 @@
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer as HTTPServer
 import json
 import threading
 import logging
@@ -8,22 +8,65 @@ logger = logging.getLogger("OLED Customizer.ExtensionReceiver")
 
 class ExtensionData:
     def __init__(self):
-        self.data = None
-        self.last_update = 0
+        self.tabs = {}  # {tabId: {"data": data, "last_update": time}}
         self.discord_code = None
+        self.last_winner_id = None
         self._lock = threading.Lock()
 
     def update(self, new_data):
+        tab_id = new_data.get("tabId", "default")
         with self._lock:
-            self.data = new_data
-            self.last_update = time.time()
+            self.tabs[tab_id] = {
+                "data": new_data,
+                "last_update": time.time()
+            }
 
     def get_data(self):
+        now = time.time()
         with self._lock:
-            # Data is valid for 5 seconds
-            if self.data and (time.time() - self.last_update < 5):
-                return self.data
-        return None
+            # 1. Cleanup stale tabs
+            stale_keys = []
+            for k, v in self.tabs.items():
+                is_playing = v["data"].get("playing") is True
+                limit = 120 if is_playing else 10
+                if now - v["last_update"] > limit:
+                    stale_keys.append(k)
+            for k in stale_keys:
+                if k == self.last_winner_id: self.last_winner_id = None
+                del self.tabs[k]
+            
+            if not self.tabs:
+                return None
+            
+            # 2. PRIORITY SELECTION
+            # Prio 0: Visible + Playing
+            # Prio 1: Playing (Background)
+            # Prio 2: Visible (Paused)
+            # Prio 3: Other
+            
+            tab_ids = list(self.tabs.keys())
+            def get_prio(k):
+                v = self.tabs[k]
+                data = v["data"]
+                is_playing = data.get("playing") is True
+                is_visible = data.get("isFocused") is True # isFocused is document.visibilityState
+                
+                if is_playing and is_visible: return 0
+                if is_playing: return 1
+                if is_visible: return 2
+                return 3
+
+            tab_ids.sort(key=lambda k: (get_prio(k), -self.tabs[k]["last_update"]))
+            best_id = tab_ids[0]
+            
+            # Stickiness: Stay with current winner if they are still playing and best is not 'visible'
+            if self.last_winner_id in self.tabs:
+                winner_v = self.tabs[self.last_winner_id]
+                if winner_v["data"].get("playing") is True and get_prio(best_id) >= 1:
+                    best_id = self.last_winner_id
+
+            self.last_winner_id = best_id
+            return self.tabs[best_id]["data"]
 
     def set_discord_code(self, code):
         with self._lock:
@@ -43,6 +86,7 @@ class ExtensionHandler(BaseHTTPRequestHandler):
     MAX_BODY_SIZE = 1_048_576  # 1 MB limit
 
     def do_POST(self):
+        logger.info(f"DEBUG: Received POST request on {self.path}")
         if self.path == '/extension_data':
             raw = self.headers.get('Content-Length', '0')
             try:
@@ -63,6 +107,7 @@ class ExtensionHandler(BaseHTTPRequestHandler):
             
             try:
                 data = json.loads(post_data.decode('utf-8'))
+                logger.info(f"DEBUG: Ext payload -> Title: {data.get('title')} | Playing: {data.get('playing')} | Focused: {data.get('isFocused')}")
                 extension_storage.update(data)
                 self.send_response(200)
             except Exception as e:
@@ -70,6 +115,7 @@ class ExtensionHandler(BaseHTTPRequestHandler):
                 self.send_response(400)
             
             self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Private-Network', 'true')
             self.end_headers()
         else:
             self.send_response(404)
@@ -87,19 +133,23 @@ class ExtensionHandler(BaseHTTPRequestHandler):
             
             self.send_response(200)
             self.send_header('Content-Type', 'text/html')
+            self.send_header('Connection', 'close')
             self.end_headers()
             self.wfile.write(b"<html><body style='background:#1f1f1f;color:white;font-family:sans-serif;text-align:center;padding-top:50px;'>")
-            self.wfile.write(b"<h1>Discord Connected!</h1><p>You can close this window and go back to OLED Customizer.</p></body></html>")
+            self.wfile.write(b"<h1>Discord Connected!</h1><p>You can close this window and go back to App.</p></body></html>")
+            self.wfile.flush()
         else:
             self.send_response(404)
             self.end_headers()
 
     def do_OPTIONS(self):
+        logger.info(f"DEBUG: Received OPTIONS (preflight) request on {self.path}")
         # Handle CORS preflight
         self.send_response(204)
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Allow-Private-Network', 'true')
         self.end_headers()
 
     def log_message(self, format, *args):
@@ -107,15 +157,16 @@ class ExtensionHandler(BaseHTTPRequestHandler):
         return
 
 class ExtensionReceiver:
-    def __init__(self, port=2408):
+    def __init__(self, port=2408, host='127.0.0.1'):
         self.port = port
+        self.host = host
         self.server = None
         self.thread = None
 
     def start(self):
         def run_server():
-            self.server = HTTPServer(('127.0.0.1', self.port), ExtensionHandler)
-            logger.info(f"Extension Receiver listening on port {self.port}")
+            self.server = HTTPServer((self.host, self.port), ExtensionHandler)
+            logger.info(f"Extension Receiver listening on {self.host}:{self.port}")
             self.server.serve_forever()
 
         self.thread = threading.Thread(target=run_server, daemon=True)
@@ -123,8 +174,11 @@ class ExtensionReceiver:
 
     def stop(self):
         if self.server:
-            # self.server.shutdown() # This can block/deadlock during app exit
-            logger.info("Extension Receiver stop triggered")
+            logger.info("Extension Receiver: Stopping...")
+            # We don't call shutdown() directly here because it can deadlock 
+            # if the server is in the middle of a request or haven't fully started.
+            # main.py's os._exit(0) is our ultimate safety net for Lite.
+            self.server = None
 
     def get_latest_data(self):
         return extension_storage.get_data()

@@ -40,6 +40,8 @@ class DiscordIPC:
         self._authenticated = False
         self._last_voice_state = {"mute": False, "deaf": False}
         self._last_poll_time = 0  # Throttle GET_VOICE_SETTINGS polls
+        self._user_tag = None
+
 
     @property
     def is_connected(self):
@@ -89,7 +91,8 @@ class DiscordIPC:
             self._send(self.OP_HANDSHAKE, {"v": 1, "client_id": self.client_id})
             resp = self._recv(timeout=2.0)
             if resp and resp.get("evt") == "READY":
-                logger.info(f"Discord Handshake OK - user: {resp['data']['user']['username']}")
+                self._user_tag = resp['data']['user']['username']
+                logger.info(f"Discord Handshake OK - user: {self._user_tag}")
                 return True
             return False
         except Exception as e:
@@ -138,7 +141,8 @@ class DiscordIPC:
             return None
 
         port = self.prefs.get_preference("discord_local_port") or 8888
-        redirect_uri = f"http://127.0.0.1:{port}"
+        host = self.prefs.get_preference("discord_redirect_host") or "127.0.0.1"
+        redirect_uri = f"http://{host}:{port}"
 
         try:
             resp = requests.post("https://discord.com/api/oauth2/token", data={
@@ -147,7 +151,7 @@ class DiscordIPC:
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": redirect_uri
-            }, timeout=10)
+            }, timeout=5)
             
             data = resp.json()
             if "access_token" in data:
@@ -177,14 +181,15 @@ class DiscordIPC:
             return False
 
     def _subscribe(self):
-        """Subscribe to voice settings updates."""
+        """Subscribe to voice settings and channel selection updates."""
         try:
+            # Voice settings (mute/deaf)
             self._send(self.OP_FRAME, {
                 "cmd": "SUBSCRIBE",
                 "evt": "VOICE_SETTINGS_UPDATE",
+                "args": {},
                 "nonce": str(uuid.uuid4())
             })
-            # Response is usually just confirmation, we don't need to wait for it here
         except Exception:
             pass
 
@@ -240,10 +245,10 @@ class DiscordIPC:
                     "mute": bool(data.get("mute", False)),
                     "deaf": bool(data.get("deaf", False))
                 }
-            elif resp.get("evt") == "ERROR":
-                logger.error(f"Discord RPC Error: {resp.get('data', {}).get('message', 'Unknown error')}")
             elif resp.get("cmd") == "SET_VOICE_SETTINGS" and resp.get("evt") == "ERROR":
                 logger.error(f"Failed to set voice settings: {resp.get('data', {}).get('message', 'Unknown error')}")
+            elif resp.get("evt") == "ERROR":
+                logger.error(f"Discord RPC Error: {resp.get('data', {}).get('message', 'Unknown error')}")
             elif resp.get("cmd") == "GET_VOICE_SETTINGS":
                 data = resp.get("data", {})
                 self._last_voice_state = {

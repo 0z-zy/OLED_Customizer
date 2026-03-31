@@ -13,7 +13,7 @@ build/
 *.exe
 
 # Lite Version (Experimental)
-/lite/
+lite_backup.zip
 
 # Local Plans & Notes (Private)
 *.md

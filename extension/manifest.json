@@ -9,7 +9,7 @@
     ],
     "host_permissions": [
         "https://www.youtube.com/*",
-        "http://127.0.0.1/*"
+        "http://127.0.0.1:*/*"
     ],
     "content_scripts": [
         {
@@ -23,6 +23,9 @@
     ],
     "icons": {
         "128": "icons/icon128.png"
+    },
+    "background": {
+        "service_worker": "background.js"
     },
     "action": {
         "default_popup": "popup.html"
