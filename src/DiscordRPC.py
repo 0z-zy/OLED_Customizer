@@ -108,12 +108,13 @@ class DiscordIPC:
         
         # 1) If we have a token, try to AUTHENTICATE
         if token:
+            logger.info("Discord: Attempting authentication with stored token...")
             if self._authenticate(token):
                 self._authenticated = True
                 self._subscribe()
                 return True
             else:
-                logger.warning("Discord token invalid/expired, clearing...")
+                logger.warning("Discord: Token invalid/expired, clearing...")
                 self.prefs.preferences["discord_access_token"] = ""
                 self.prefs.save_preferences()
                 token = None
@@ -122,7 +123,7 @@ class DiscordIPC:
         if not token and self.extension_receiver:
             code = self.extension_receiver.get_discord_code()
             if code:
-                logger.info("Found captured Discord Auth Code, exchanging for token...")
+                logger.info("Discord: Found captured Auth Code from extension, exchanging for token...")
                 new_token = self._exchange_code(code)
                 if new_token:
                     self.prefs.preferences["discord_access_token"] = new_token
@@ -239,22 +240,26 @@ class DiscordIPC:
             if not resp:
                 break
             
-            if resp.get("evt") == "VOICE_SETTINGS_UPDATE":
-                data = resp.get("data", {})
+            evt = resp.get("evt")
+            cmd = resp.get("cmd")
+            data = resp.get("data", {})
+
+            if evt == "VOICE_SETTINGS_UPDATE":
                 self._last_voice_state = {
                     "mute": bool(data.get("mute", False)),
                     "deaf": bool(data.get("deaf", False))
                 }
-            elif resp.get("cmd") == "SET_VOICE_SETTINGS" and resp.get("evt") == "ERROR":
-                logger.error(f"Failed to set voice settings: {resp.get('data', {}).get('message', 'Unknown error')}")
-            elif resp.get("evt") == "ERROR":
-                logger.error(f"Discord RPC Error: {resp.get('data', {}).get('message', 'Unknown error')}")
-            elif resp.get("cmd") == "GET_VOICE_SETTINGS":
-                data = resp.get("data", {})
+                logger.debug(f"Discord RPC: Event VOICE_SETTINGS_UPDATE -> {self._last_voice_state}")
+            elif cmd == "SET_VOICE_SETTINGS" and evt == "ERROR":
+                logger.error(f"Discord RPC: Failed to set voice settings: {data.get('message', 'Unknown error')}")
+            elif evt == "ERROR":
+                logger.error(f"Discord RPC: Generic Error: {data.get('message', 'Unknown error')}")
+            elif cmd == "GET_VOICE_SETTINGS" and not evt == "ERROR":
                 self._last_voice_state = {
                     "mute": bool(data.get("mute", False)),
                     "deaf": bool(data.get("deaf", False))
                 }
+                logger.debug(f"Discord RPC: Response GET_VOICE_SETTINGS -> {self._last_voice_state}")
 
         # 3) If authenticated, poll as a safety net every 5s
         # (VOICE_SETTINGS_UPDATE subscription handles real-time changes)

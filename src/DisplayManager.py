@@ -1226,19 +1226,24 @@ class DisplayManager:
                         else:
                             # Full reset if it's been a long time or a fresh start
                             self._last_discord_state = None
+                            self._last_hw_state = None
                             
                         self._discord_disconnect_ts = 0.0
                         
                         # Initial poll right after connecting
                         voice = self._discord_ipc.get_voice_settings()
                         if voice:
-                            # Update display state immediately on reconnect
+                            # Establish initial baseline so the first loop iteration doesn't think it's a 'change'
+                            initial_mute = bool(voice["mute"] or voice["deaf"])
+                            self._last_discord_state = initial_mute
+                            
+                            # Also sync to UI immediately
                             self.volume_overlay.set_discord_mute(
                                 voice["mute"], voice["deaf"], True
                             )
                             # LOCKOUT: Give the connection 2 seconds to settle before allowed button syncs.
-                            # firmware/RPC chatter often follows a fresh connect.
                             self._sync_lockout_until = now + 2.0
+                            logger.info(f"Discord IPC: Initial state established (Muted={initial_mute}) - Sync Lockout for 2s")
                     else:
                         # Discord not running — hold state for 10s before clearing
                         if self._discord_disconnect_ts == 0.0:
@@ -1262,7 +1267,7 @@ class DisplayManager:
                     
                     # 1. Did Discord change?
                     if new_discord_mute != self._last_discord_state:
-                        logger.info(f"Discord Event: Muted={new_discord_mute}")
+                        logger.info(f"[DISCORD-SYNC] Discord state changed: {self._last_discord_state} -> {new_discord_mute}")
                         self._last_discord_state = new_discord_mute
                         self._last_hw_state = new_discord_mute
                         self._last_hw_event_ts = new_hw_event_ts
@@ -1277,7 +1282,7 @@ class DisplayManager:
                         and new_hw_event_ts > self._last_hw_event_ts
                         and new_hw_mute != self._last_hw_state
                     ):
-                        logger.info(f"Hardware Event: Muted={new_hw_mute}")
+                        logger.info(f"[HARDWARE-SYNC] Hardware button pressed: {self._last_hw_state} -> {new_hw_mute}")
                         self._last_hw_state = new_hw_mute
                         self._last_discord_state = new_hw_mute
                         self._last_hw_event_ts = new_hw_event_ts

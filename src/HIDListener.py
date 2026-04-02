@@ -369,14 +369,14 @@ class HIDListener(threading.Thread):
                 # If we ALREADY think the hardware is in the desired state,
                 # skip the long write cycle entirely to avoid firmware overwhelm/loops.
                 if self._last_state == is_muted:
-                    logger.debug("HID Sync: Hardware already in state %s, skipping write", is_muted)
+                    logger.debug(f"HID Sync: Hardware already in state {is_muted}, skipping redundant write")
                     return True
 
                 if self._last_hw_ts <= issued_at:
                     self._last_state = is_muted
                     self._last_write_ts = time()
 
-            logger.info("HID Sync: Sending mute=%s to headset", is_muted)
+            logger.info(f"HID Sync: [HOST-WRITE] Sending mute={is_muted} to headset profile...")
             state_byte = 0x01 if is_muted else 0x00
             write_success = 0
             output_success = 0
@@ -497,8 +497,24 @@ class HIDListener(threading.Thread):
 
                 if bytes_read.value > 0:
                     data = bytes(read_buf.raw[:bytes_read.value])
+                    # Profile Verification: Cloud III sends mute on 0d 02 03 ...
                     if len(data) >= 6 and data[0] == 0x0D and data[1:3] == b'\x02\x03':
-                        is_muted = (data[5] == 0x01)
+                        # Byte 4 is the command/identity. 
+                        # 0x05 = Mute Status (Confirmed for Cloud III)
+                        # 0x01 = Alternate or Battery/Other info
+                        report_type = data[4]
+                        report_val  = data[5]
+
+                        # Only process as a Mute Event if:
+                        # 1) It's a known mute-status report type (0x05)
+                        # 2) AND the value is a clean boolean (0x00 or 0x01)
+                        # This ignores battery reports (like 0x01 0x30 for 48%)
+                        if report_type == 0x05 and report_val in (0x00, 0x01):
+                            is_muted = (report_val == 0x01)
+                        else:
+                            # Skip this report - it's likely battery, boom-plug, or other noise
+                            continue
+
                         now = time()
                         
                         # 0. Baseline Initialization: If this is the VERY FIRST report, 
