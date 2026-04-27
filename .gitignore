@@ -19,7 +19,6 @@ lite_backup.zip
 # Local Plans & Notes (Private)
 *.md
 !README.md
-!GH release manual.md
 
 # Except the main executables
 !OLED-Customizer.exe
