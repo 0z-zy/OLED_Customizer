@@ -167,6 +167,7 @@ class DisplayManager:
         self._last_frame_sent_time = 0
         self._last_heartbeat_time = 0  # Heartbeat to keep game registered
         self._frame_fail_start = 0     # Tracks when frame sends started failing
+        self._last_gg_restart_attempt = 0  # Cooldown for auto-restarting hung GG
 
         # Spotify worker thread (single persistent thread instead of spawning new ones)
         self._spotify_queue = Queue(maxsize=1)
@@ -464,31 +465,6 @@ class DisplayManager:
                                 # Don't suppress — let other apps see the key too
                                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
-                            # ---- Calculator control keys ----
-                            if self._calculator_active:
-                                if vk == VK_ESCAPE:
-                                    self._calculator_active = False
-                                    _enqueue("calc_exit")
-                                    return user32.CallNextHookEx(None, nCode, wParam, lParam)
-                                if vk == VK_RETURN and not (flags & 0x01):
-                                    _enqueue("calc_input:enter")
-                                    return user32.CallNextHookEx(None, nCode, wParam, lParam)
-                                if vk == VK_BACK:
-                                    _enqueue("calc_input:backspace")
-                                    return user32.CallNextHookEx(None, nCode, wParam, lParam)
-                                if vk == VK_DELETE:
-                                    _enqueue("calc_input:delete")
-                                    return user32.CallNextHookEx(None, nCode, wParam, lParam)
-
-                                # ---- Parentheses — layout-agnostic via ToUnicode ----
-                                # Works on TR keyboard (Shift+8 = '(', Shift+9 = ')')
-                                # and EN keyboard (Shift+9 = '(', Shift+0 = ')') etc.
-                                scan = ctypes.c_uint32.from_address(addr + 4).value
-                                ch = _vk_to_char(vk, scan)
-                                if ch in ("(", ")"):
-                                    _enqueue(f"calc_input:{ch}")
-                                    return LRESULT(1).value  # suppress so game doesn't see it
-
                             # ---- Normal hotkeys (always active) ----
                             if self._vk_monitor and vk == self._vk_monitor:
                                 _enqueue("trigger_monitor")
@@ -499,20 +475,51 @@ class DisplayManager:
                                 _enqueue("toggle_mute")
                                 return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
-                        # ---- Numpad suppression (calculator active) ----
+                        # ---- Calculator Input and Suppression (Active Mode) ----
+                        # Processed outside `if is_down` so we suppress BOTH down and up events
+                        # to prevent ghost "key up" inputs in games/OS.
                         if self._calculator_active:
-                            is_numpad = vk in NUMPAD_VKS
-                            is_numpad_enter = (vk == 0x0D and (flags & 0x01))
+                            is_suppressed = False
 
-                            if is_numpad or is_numpad_enter:
+                            if vk == VK_ESCAPE:
                                 if is_down:
-                                    if 96 <= vk <= 105:
-                                        _enqueue(f"calc_input:{vk - 96}")
-                                    elif vk in NUMPAD_OP_MAP:
-                                        _enqueue(f"calc_input:{NUMPAD_OP_MAP[vk]}")
-                                    elif is_numpad_enter:
-                                        _enqueue("calc_input:enter")
-                                return LRESULT(1).value  # SUPPRESS numpad keys
+                                    self._calculator_active = False
+                                    _enqueue("calc_exit")
+                                is_suppressed = True
+                            elif vk == VK_RETURN:
+                                if is_down:
+                                    _enqueue("calc_input:enter")
+                                is_suppressed = True
+                            elif vk == VK_BACK:
+                                if is_down:
+                                    _enqueue("calc_input:backspace")
+                                is_suppressed = True
+                            elif vk == VK_DELETE:
+                                if is_down:
+                                    _enqueue("calc_input:delete")
+                                is_suppressed = True
+                            else:
+                                # ---- Number row and Symbols (layout-agnostic) ----
+                                # Works on TR keyboard, EN keyboard, TKL boards, etc.
+                                scan = ctypes.c_uint32.from_address(addr + 4).value
+                                ch = _vk_to_char(vk, scan)
+                                if ch in "0123456789+-*/.,()":
+                                    if is_down:
+                                        _enqueue(f"calc_input:{ch}")
+                                    is_suppressed = True
+                                else:
+                                    # ---- Legacy Numpad suppression (fallback) ----
+                                    is_numpad = vk in NUMPAD_VKS
+                                    if is_numpad:
+                                        if is_down:
+                                            if 96 <= vk <= 105:
+                                                _enqueue(f"calc_input:{vk - 96}")
+                                            elif vk in NUMPAD_OP_MAP:
+                                                _enqueue(f"calc_input:{NUMPAD_OP_MAP[vk]}")
+                                        is_suppressed = True
+
+                            if is_suppressed:
+                                return LRESULT(1).value  # SUPPRESS key
 
                 except Exception:
                     pass  # Never let an exception escape the hook callback
@@ -607,6 +614,39 @@ class DisplayManager:
                 logger.debug("Failed to stop HID listener cleanly: %s", e)
             self._hid_listener = None
             logger.info("Headset HID sync disabled by preference")
+
+    def _restart_steelseries_gg(self):
+        """Kill and restart SteelSeries GG when its API becomes unresponsive.
+        This handles the case where GG.exe is still 'running' but its HTTP API
+        on localhost is frozen/hung and doesn't respond to requests."""
+        import subprocess
+        try:
+            # Force-kill all GG processes
+            for proc_name in ["SteelSeriesGG.exe", "SteelSeriesGGClient.exe"]:
+                subprocess.run(
+                    ["taskkill", "/F", "/IM", proc_name],
+                    capture_output=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+            logger.info("Auto-Recovery: Killed SteelSeries GG processes")
+            sleep(5)  # Wait for cleanup
+
+            # Relaunch GG
+            gg_path = find_steelseries_gg_path()
+            if gg_path:
+                args = r'-dataPath="C:\ProgramData\SteelSeries\GG" -dbEnv=production'
+                launch_process(gg_path, args)
+                logger.info("Auto-Recovery: Relaunched SteelSeries GG")
+                sleep(10)  # Wait for API to come up
+            else:
+                logger.warning("Auto-Recovery: Could not find SteelSeries GG path for relaunch")
+
+            # Mark GG as 'was not running' so the main loop triggers re-registration
+            self._gg_was_running = False
+            # Reset the success timer so we don't immediately re-trigger
+            self.steelseries_api._last_success_time = time()
+        except Exception as e:
+            logger.error("Auto-Recovery: Failed to restart SteelSeries GG: %s", e)
 
     def load_preferences(self):
         self.user_preferences.load_preferences()
@@ -910,6 +950,17 @@ class DisplayManager:
                     self.steelseries_api.heartbeat()
                 except Exception:
                     pass
+
+            # Auto-restart GG if its API has been unresponsive for 2+ minutes
+            # This catches the case where GG.exe is running but its HTTP API is frozen
+            api_silent_secs = now_sec - self.steelseries_api._last_success_time
+            if api_silent_secs > 120 and (now_sec - self._last_gg_restart_attempt) > 300:
+                logger.warning(
+                    "Auto-Recovery: SteelSeries API unresponsive for %.0fs, restarting GG...",
+                    api_silent_secs
+                )
+                self._last_gg_restart_attempt = now_sec
+                self._restart_steelseries_gg()
 
             sleep(1 / self.fps)
 

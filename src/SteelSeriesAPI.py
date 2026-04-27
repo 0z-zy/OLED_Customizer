@@ -53,6 +53,9 @@ class SteelSeriesAPI:
         # Frame counter for periodic manual GC collection
         self._frames_sent = 0
         
+        # Track last successful API response (used by DisplayManager to detect hung GG)
+        self._last_success_time = time()
+        
         self.retrieve_address()
 
     def retrieve_address(self, retries=None):
@@ -213,6 +216,7 @@ class SteelSeriesAPI:
                 if response.status == 200:
                     self._consecutive_errors = 0
                     self._backoff_level = 0
+                    self._last_success_time = time()
                 else:
                     logger.debug("SteelSeries API error %d: %s", response.status, resp_data.decode('utf-8', 'ignore'))
                     self._consecutive_errors += 1

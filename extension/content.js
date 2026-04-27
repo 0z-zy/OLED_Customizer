@@ -57,30 +57,42 @@ function scrapeMediaInfo() {
     let artist = "";
 
     if (window.location.host.includes('youtube.com')) {
-        // 1. Try Meta Tags (Most stable, works in background)
+        // 1. Try Specific DOM Selectors (Most accurate when page is loaded)
+        let domTitle = "";
+        let domArtist = "";
+
+        if (window.location.pathname.startsWith('/shorts/')) {
+            const shortTitleEl = document.querySelector('ytd-reel-video-renderer[is-active] h2.title');
+            const shortArtistEl = document.querySelector('ytd-reel-video-renderer[is-active] #channel-name a') || 
+                                 document.querySelector('ytd-reel-video-renderer[is-active] ytd-channel-name a');
+            domTitle = shortTitleEl ? (shortTitleEl.textContent || "").trim() : "";
+            domArtist = shortArtistEl ? (shortArtistEl.textContent || "").trim() : "";
+        } else {
+            const titleEl = document.querySelector('h1.ytd-watch-metadata') || 
+                           document.querySelector('yt-formatted-string.ytd-video-primary-info-renderer');
+            const artistEl = document.querySelector('#owner-name a') || 
+                            document.querySelector('ytd-channel-name #text');
+            domTitle = titleEl ? (titleEl.textContent || "").trim() : "";
+            domArtist = artistEl ? (artistEl.textContent || "").trim() : "";
+        }
+
+        // 2. Try Meta Tags (Backup / Background)
         const metaTitle = document.querySelector('meta[name="title"]') || document.querySelector('meta[property="og:title"]');
         const metaArtist = document.querySelector('meta[name="author"]') || document.querySelector('link[itemprop="name"]');
         
-        title = metaTitle ? (metaTitle.content || "").trim() : "";
-        artist = metaArtist ? (metaArtist.content || metaArtist.getAttribute('content') || "").trim() : "";
+        title = domTitle || (metaTitle ? (metaTitle.content || "").trim() : "");
+        artist = domArtist || (metaArtist ? (metaArtist.content || metaArtist.getAttribute('content') || "").trim() : "");
 
-        // 2. Fallbacks
-        if (!title || title.length < 2) {
+        // 3. Fallbacks
+        if (!title || title.length < 2 || title.toLowerCase() === "youtube") {
             title = document.title.replace(" - YouTube", "").trim();
         }
         
         // Remove notification counts like (1) from title
         title = title.replace(/^\(\d+\)\s*/, "");
 
-        if (!artist || artist.length < 2) {
-            // Shorts Specific Artist
-            if (window.location.pathname.startsWith('/shorts/')) {
-                const channelEl = document.querySelector('ytd-reel-video-renderer[is-active] #channel-name a') || 
-                                 document.querySelector('ytd-reel-video-renderer[is-active] ytd-channel-name a');
-                artist = channelEl ? (channelEl.textContent || "").trim() : "YouTube Shorts";
-            } else {
-                artist = "YouTube Video";
-            }
+        if (!artist || artist.length < 2 || artist.toLowerCase() === "youtube video") {
+            artist = window.location.host.includes('youtube.com') ? "YouTube Video" : "Unknown Artist";
         }
 
         // 3. Persistent Memory (Lock in the title if it's currently 'Unknown' but we knew it before)
@@ -90,11 +102,32 @@ function scrapeMediaInfo() {
             title = lastGoodMetadata[videoId].title;
             artist = lastGoodMetadata[videoId].artist;
         }
+    } else {
+        // General Metadata Scraper for other sites
+        title = document.title.trim();
+        
+        // Try to find an artist/author
+        const authorMeta = document.querySelector('meta[name="author"]') || 
+                          document.querySelector('meta[property="article:author"]') ||
+                          document.querySelector('meta[property="og:site_name"]');
+        
+        artist = authorMeta ? authorMeta.content : "";
+        
+        if (!artist) {
+            // Use hostname as fallback artist
+            artist = window.location.hostname.replace('www.', '');
+        }
+
+        // Clean up common suffixes
+        title = title.replace(/\s*(-|\|)\s*.*$/, '').trim(); 
     }
 
     return {
         title: title || "Unknown Title",
         artist: artist || "Unknown Artist",
+        artwork: window.location.host.includes('youtube.com') 
+            ? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` 
+            : (document.querySelector('meta[property="og:image"]')?.content || ""),
         duration: video.duration || 0,
         progress: video.currentTime || 0,
         playing: !video.paused,

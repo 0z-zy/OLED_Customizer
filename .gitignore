@@ -11,6 +11,7 @@ venv/
 dist/
 build/
 *.exe
+plan.md
 
 # Lite Version (Experimental)
 lite_backup.zip
