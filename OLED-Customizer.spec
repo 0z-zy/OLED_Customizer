@@ -82,16 +82,30 @@ for pkg in problem_pkgs:
     extra_binaries += b
     extra_hidden += h
 
-# Conda's _ctypes.pyd links against ffi DLLs in Library\bin which PyInstaller's
-# dependency scan can miss, yielding an exe that dies on `import ctypes`
-# ("DLL load failed while importing _ctypes"). Bundle them explicitly.
+# Conda stdlib extension modules (_ctypes, _sqlite3, _ssl, _lzma, _bz2,
+# _tkinter, ...) link against runtime DLLs in Library\bin which PyInstaller's
+# dependency scan misses on this setup, yielding an exe that dies with
+# "DLL load failed while importing _xxx". Bundle the whole set explicitly.
 import sys as _sys
 _conda_lib_bin = os.path.join(_sys.prefix, 'Library', 'bin')
-for _dll in ('ffi.dll', 'ffi-7.dll', 'ffi-8.dll', 'libffi-7.dll', 'libffi-8.dll'):
-    _p = os.path.join(_conda_lib_bin, _dll)
-    if os.path.exists(_p):
-        extra_binaries.append((_p, '.'))
-        print(f"Explicitly bundling {_p}")
+_conda_dll_patterns = [
+    'ffi*.dll', 'libffi*.dll',            # _ctypes
+    'sqlite3*.dll',                        # _sqlite3
+    'libcrypto*.dll', 'libssl*.dll',       # _ssl, _hashlib
+    'liblzma*.dll',                        # _lzma
+    'libbz2*.dll', 'LIBBZ2*.dll', 'bz2*.dll',  # _bz2
+    'libexpat*.dll',                       # pyexpat, _elementtree
+    'tcl86*.dll', 'tk86*.dll',             # _tkinter
+    'zlib*.dll',                           # tk/zlib users
+]
+_seen_dlls = set()
+for _pat in _conda_dll_patterns:
+    for _p in glob.glob(os.path.join(_conda_lib_bin, _pat)):
+        _base = os.path.basename(_p).lower()
+        if _base not in _seen_dlls:
+            _seen_dlls.add(_base)
+            extra_binaries.append((_p, '.'))
+            print(f"Explicitly bundling {_p}")
 
 # List of assets to include
 added_files = [

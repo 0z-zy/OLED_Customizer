@@ -31,6 +31,11 @@ class FPSMonitor:
         self._fps_value = 0
         self._running = False
         self._lib = None
+        # Generation token: a worker exits when its generation is stale, so a
+        # fast stop()->start() cycle can't resurrect the old worker thread.
+        self._worker_gen = 0
+        # Serializes all DLL calls (worker vs start/stop from other threads)
+        self._dll_lock = Lock()
         self._initialized = True
         
         # Determine DLL path
@@ -52,8 +57,9 @@ class FPSMonitor:
             return
 
         try:
-            self._lib = ctypes.CDLL(self._dll_path)
-            
+            if self._lib is None:
+                self._lib = ctypes.CDLL(self._dll_path)
+
             # Setup argtypes/restypes for PresentMon.dll
             # int64_t StartEventRecording(int64_t pid, int64_t max_samples)
             self._lib.StartEventRecording.restype = ctypes.c_int64
@@ -73,28 +79,32 @@ class FPSMonitor:
             ]
 
             # Start recording (pid 0 = all processes)
-            res = self._lib.StartEventRecording(0, 86400)
+            with self._dll_lock:
+                res = self._lib.StartEventRecording(0, 86400)
             if res != PresentMonExitCodes.STATUS_OK:
                 logger.error(f"FPSMonitor: Failed to start recording (Error {res})")
                 return
-                
+
             self._running = True
-            Thread(target=self._worker_loop, daemon=True, name="FPS-DLL-Worker").start()
+            self._worker_gen += 1
+            Thread(target=self._worker_loop, args=(self._worker_gen,),
+                   daemon=True, name="FPS-DLL-Worker").start()
             logger.info("FPSMonitor: Native PresentMon logic started")
             
         except Exception as e:
             logger.error(f"FPSMonitor: Failed to load/init DLL: {e}")
 
-    def _worker_loop(self):
+    def _worker_loop(self, gen):
         # Local buffers for GetCurrentData
         num_samples = 1
         data_buf = (ctypes.c_double * (num_samples * 6))()
         time_buf = (ctypes.c_double * num_samples)()
         size_buf = (ctypes.c_int64 * 1)()
-        
-        while self._running:
+
+        while self._running and gen == self._worker_gen:
             try:
-                res = self._lib.GetCurrentData(num_samples, data_buf, time_buf, size_buf)
+                with self._dll_lock:
+                    res = self._lib.GetCurrentData(num_samples, data_buf, time_buf, size_buf)
                 if res == PresentMonExitCodes.STATUS_OK and size_buf[0] > 0:
                     # Index 0 is FPS
                     with self._lock:
@@ -112,7 +122,9 @@ class FPSMonitor:
 
     def stop(self):
         self._running = False
+        self._worker_gen += 1  # invalidate any live worker immediately
         if self._lib:
             try:
-                self._lib.StopEventRecording()
+                with self._dll_lock:
+                    self._lib.StopEventRecording()
             except Exception: pass

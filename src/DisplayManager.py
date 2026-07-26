@@ -1363,7 +1363,18 @@ class DisplayManager:
                 
                 # Listen/Poll for voice settings
                 voice = self._discord_ipc.get_voice_settings()
-                
+
+                # Pipe open but OAuth incomplete: get_voice_settings only
+                # returns a {mute: False} placeholder, which would clobber real
+                # state and make the OLED lie (icon unmuted while the system
+                # mic is muted via the hotkey fallback). Treat as disconnected:
+                # system mic drives display + hotkey, while auth keeps retrying
+                # inside get_voice_settings on every poll.
+                if voice is not None and not self._discord_ipc._authenticated:
+                    self.volume_overlay.set_discord_mute(None, None, False)
+                    sleep(1.0)
+                    continue
+
                 if voice:
                     # --- DIRECT EVENT-BASED SYNC LOGIC ---
                     # The lockout window suppresses echo events while one side
