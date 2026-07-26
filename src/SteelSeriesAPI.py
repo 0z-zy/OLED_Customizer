@@ -56,12 +56,14 @@ class SteelSeriesAPI:
         # Track last successful API response (used by DisplayManager to detect hung GG)
         self._last_success_time = time()
         
-        self.retrieve_address()
+        # Bounded: never loop forever in the constructor. If GG isn't up yet,
+        # DisplayManager's run loop re-registers once it detects GG running.
+        self.retrieve_address(retries=2)
 
     def retrieve_address(self, retries=None):
         """
         Locate coreProps.json and register with the GameSense API.
-        If retries is None, loops forever (used for startup).
+        If retries is None, loops forever.
         Otherwise attempts specified number of retries before giving up.
         """
         attempt = 0

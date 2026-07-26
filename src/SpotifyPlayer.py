@@ -4,19 +4,27 @@ from src.ScrollableText import ScrollableText
 
 
 class SpotifyPlayer:
+    @staticmethod
+    def _safe_font(path, size):
+        try:
+            return ImageFont.truetype(font=path, size=size)
+        except Exception:
+            # Fallback so a missing/corrupt font can't crash startup
+            try:
+                return ImageFont.load_default()
+            except Exception:
+                return None
+
     def __init__(self, config, preferences, fps=None):
         # ORİJİNAL FONTLAR
-        self.ARTIST_FONT = ImageFont.truetype(
-            font=fetch_content_path('fonts/MunroSmall.ttf'),
-            size=10,
-        )
-        self.TITLE_FONT = ImageFont.truetype(
-            font=fetch_content_path(
+        self.ARTIST_FONT = self._safe_font(fetch_content_path('fonts/MunroSmall.ttf'), 10)
+        self.TITLE_FONT = self._safe_font(
+            fetch_content_path(
                 'fonts/VerdanaBoldExtended.ttf'
                 if preferences.get_preference('extended_font')
                 else 'fonts/VerdanaBold.ttf'
             ),
-            size=11,
+            11,
         )
 
         self.DURATION_FONT = self.ARTIST_FONT

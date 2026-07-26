@@ -160,7 +160,9 @@ class DisplayManager:
 
         # gg flicker azalt
         self._last_sent_frame = None
-        self._gg_was_running = True
+        # If startup registration failed (GG not up yet), start False so the
+        # run loop triggers a re-registration as soon as GG is detected
+        self._gg_was_running = bool(self.steelseries_api.address)
         self._last_rgb_send_ms = 0
 
         # STICKY SOURCE logic
@@ -173,6 +175,7 @@ class DisplayManager:
         self._last_heartbeat_time = 0  # Heartbeat to keep game registered
         self._frame_fail_start = 0     # Tracks when frame sends started failing
         self._last_gg_restart_attempt = 0  # Cooldown for auto-restarting hung GG
+        self._gg_restart_in_progress = False
 
         # Spotify worker thread (single persistent thread instead of spawning new ones)
         self._spotify_queue = Queue(maxsize=1)
@@ -623,7 +626,12 @@ class DisplayManager:
     def _restart_steelseries_gg(self):
         """Kill and restart SteelSeries GG when its API becomes unresponsive.
         This handles the case where GG.exe is still 'running' but its HTTP API
-        on localhost is frozen/hung and doesn't respond to requests."""
+        on localhost is frozen/hung and doesn't respond to requests.
+
+        Runs on a background thread; guarded so only one restart runs at a time."""
+        if self._gg_restart_in_progress:
+            return
+        self._gg_restart_in_progress = True
         import subprocess
         try:
             # Force-kill all GG processes
@@ -652,6 +660,8 @@ class DisplayManager:
             self.steelseries_api._last_success_time = time()
         except Exception as e:
             logger.error("Auto-Recovery: Failed to restart SteelSeries GG: %s", e)
+        finally:
+            self._gg_restart_in_progress = False
 
     def load_preferences(self):
         self.user_preferences.load_preferences()
@@ -767,7 +777,8 @@ class DisplayManager:
                              args = r'-dataPath="C:\ProgramData\SteelSeries\GG" -dbEnv=production'
                              result = launch_process(gg_path, args, minimized=True)
                              logger.info(f"Launch result: {result}")
-                             sleep(15) # Wait for it to start
+                             # No blocking wait: the loop re-checks every 2s and
+                             # the 60s cooldown above prevents relaunch spam.
                          else:
                              logger.warning("Auto-launch enabled but SteelSeries GG path not found.")
 
@@ -973,7 +984,9 @@ class DisplayManager:
                     api_silent_secs
                 )
                 self._last_gg_restart_attempt = now_sec
-                self._restart_steelseries_gg()
+                # Run in background: the restart sleeps ~15s and must not
+                # freeze rendering/overlays for that long
+                Thread(target=self._restart_steelseries_gg, daemon=True, name="GG-Restart").start()
 
             sleep(1 / self.fps)
 

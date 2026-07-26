@@ -1,6 +1,7 @@
-from os import path, getenv, makedirs
+from os import path, makedirs, replace
 from json import loads, dumps
 from copy import deepcopy
+from threading import Thread
 
 import logging
 import ctypes
@@ -48,8 +49,9 @@ class UserPreferences:
         "discord_client_secret": "",
         "discord_access_token": "",
         "headset_hid_sync_enabled": False,
-        "local_port": 2408,
-        "discord_local_port": 8888
+        "discord_local_port": 8888,
+        "show_headset_battery": False,
+        "show_album_art": False
     }
 
     def __init__(self):
@@ -63,29 +65,54 @@ class UserPreferences:
 
         try:
             with open(self.config_path, "r") as file:
-                try:
-                    self.preferences = loads(file.read())
-
-                    modified = False
-                    for key, value in self.DEFAULT.items():
-                        if key not in self.preferences:
-                            self.preferences[key] = value
-                            modified = True
-
-                    if modified:
-                        self.save_preferences()
-                    return True
-                
-                except Exception as e:
-                    self.valid = False
-                    logger.error("Error loading preferences: " + str(e))
-                    ctypes.windll.user32.MessageBoxW(0, f"Error loading preferences: {str(e)}", "Error", 0x10)
-                    return False
-                
+                raw = file.read()
         except FileNotFoundError:
             logger.info("No preferences found, created default preferences")
             self.save_preferences()
+            return True
+
+        try:
+            parsed = loads(raw)
+            if not isinstance(parsed, dict):
+                raise ValueError("config.json root must be an object")
+            self.preferences = parsed
+        except Exception as e:
+            # Recover instead of refusing to run: keep the broken file for
+            # inspection, reset to defaults, and warn without blocking any thread.
+            logger.error("Corrupt config.json (%s) — resetting to defaults", e)
+            try:
+                replace(self.config_path, self.config_path + ".bad")
+            except OSError:
+                pass
+            self.preferences = deepcopy(self.DEFAULT)
+            self.save_preferences()
+            self._warn_corrupt_config(str(e))
+            return True
+
+        modified = False
+        for key, value in self.DEFAULT.items():
+            if key not in self.preferences:
+                self.preferences[key] = value
+                modified = True
+
+        if modified:
+            self.save_preferences()
         return True
+
+    @staticmethod
+    def _warn_corrupt_config(detail):
+        def _show():
+            try:
+                ctypes.windll.user32.MessageBoxW(
+                    0,
+                    "Your config.json was corrupt and has been reset to defaults.\n"
+                    "The old file was kept as config.json.bad.\n\n" + detail,
+                    "OLED Customizer - Settings Reset",
+                    0x30,  # MB_ICONWARNING
+                )
+            except Exception:
+                pass
+        Thread(target=_show, daemon=True).start()
 
     def save_preferences(self):
         # Ensure the directory exists before writing
