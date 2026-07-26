@@ -62,6 +62,7 @@ class HIDListener(threading.Thread):
         self.device_path = None
         self._running = False
         self._last_state = None
+        self.battery_percent = None  # last battery % reported by the headset
         self._last_hw_ts = 0.0      # time of last physical/accepted report
         self._last_write_ts = 0.0   # time of last host-originated write
         self._suppress_until = 0.0  # silence initial chatter
@@ -511,8 +512,12 @@ class HIDListener(threading.Thread):
                         # This ignores battery reports (like 0x01 0x30 for 48%)
                         if report_type == 0x05 and report_val in (0x00, 0x01):
                             is_muted = (report_val == 0x01)
+                        elif report_type == 0x01 and 0 < report_val <= 100:
+                            # Battery status report (e.g. 0x01 0x30 = 48%)
+                            self.battery_percent = int(report_val)
+                            continue
                         else:
-                            # Skip this report - it's likely battery, boom-plug, or other noise
+                            # Skip this report - boom-plug or other noise
                             continue
 
                         now = time()

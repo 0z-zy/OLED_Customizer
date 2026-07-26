@@ -328,6 +328,8 @@ class SettingsGUI:
         self.vars["auto_launch_gg"] = tk.BooleanVar(value=bool(self.prefs.get_preference("auto_launch_gg")))
         self.vars["hw_polling_interval"] = tk.StringVar(value=self._display_for("hw_polling_interval", self.prefs.get_preference("hw_polling_interval") or 1000))
         self.vars["show_game_fps"] = tk.BooleanVar(value=bool(self.prefs.get_preference("show_game_fps")))
+        self.vars["show_headset_battery"] = tk.BooleanVar(value=bool(self.prefs.get_preference("show_headset_battery")))
+        self.vars["show_album_art"] = tk.BooleanVar(value=bool(self.prefs.get_preference("show_album_art")))
         self.vars["selected_gpu"] = tk.StringVar(value=self.prefs.get_preference("selected_gpu") or "Auto")
         self.vars["spotify_fetch_delay"] = tk.StringVar(value=self._display_for("spotify_fetch_delay", self.prefs.get_preference("spotify_fetch_delay") or 2))
         self.vars["discord_client_id"] = tk.StringVar(value=self.prefs.get_preference("discord_client_id") or "")
@@ -361,6 +363,8 @@ class SettingsGUI:
         self._toggle_row(p_disp, "Always Show System Stats", self.vars["display_hw_monitor"], command=lambda: self._exclusive_toggle("display_hw_monitor", "display_timer"))
         tk.Frame(p_disp, bg=Colors.CONTENT, height=10).pack()
         self._toggle_row(p_disp, "Show Game FPS", self.vars["show_game_fps"])
+        self._toggle_row(p_disp, "Show Headset Battery (needs HID Sync)", self.vars["show_headset_battery"])
+        self._toggle_row(p_disp, "Show Album Art in Player", self.vars["show_album_art"])
         available_gpus = ["Auto"]
         try:
             from src.HardwareMonitor import _lhm_worker

@@ -126,6 +126,10 @@ class DisplayManager:
         self._set_headset_hid_sync_enabled(
             bool(self.user_preferences.get_preference("headset_hid_sync_enabled"))
         )
+        # Headset battery for the HW monitor (opt-in pref; needs HID sync on)
+        self.hardware_monitor.battery_getter = lambda: (
+            self._hid_listener.battery_percent if self._hid_listener else None
+        )
         Thread(target=self._discord_rpc_loop, daemon=True, name="Discord-RPC").start()
 
         now_ms = int(time() * 1000)
