@@ -83,12 +83,15 @@ class Timer:
         draw.rectangle((x0 + 2, 0, x1 - 2, 1), fill=on)        # nub
         draw.rectangle((x0, top, x1, bot), outline=on)          # body
 
-        # Fill upward from the bottom, proportional to charge
-        inner_top, inner_bot = top + 1, bot - 1
-        inner_h = inner_bot - inner_top + 1
-        fill_h = int(round(inner_h * max(0, min(100, pct)) / 100.0))
-        if fill_h > 0:
-            draw.rectangle((x0 + 1, inner_bot - fill_h + 1, x1 - 1, inner_bot), fill=on)
+        # 4 discrete segments (25% each) rather than one continuous fill —
+        # a solid block reads as a single bar and you can't judge the level
+        # at a glance. 4 x 2px bars + 3 x 1px gaps == the 11px interior.
+        SEGMENTS, SEG_H, GAP = 4, 2, 1
+        inner_bot = bot - 1
+        lit = max(0, min(SEGMENTS, -(-max(0, min(100, pct)) // (100 // SEGMENTS))))
+        for i in range(lit):
+            y_bot = inner_bot - i * (SEG_H + GAP)
+            draw.rectangle((x0 + 1, y_bot - SEG_H + 1, x1 - 1, y_bot), fill=on)
 
         # Level underneath, right-aligned with the icon
         draw.text((x1 + 1, 16), str(pct), font=self.FONT_BATT, fill=on, anchor="rt")
