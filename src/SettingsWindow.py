@@ -161,11 +161,31 @@ class SettingsGUI:
         "hw_polling_interval": {"500ms": "500", "1s (Default)": "1000", "2s": "2000", "5s": "5000"},
     }
 
+    # tkinter keysym -> the "Key.x" strings DisplayManager._key_str_to_vk expects
+    KEYSYM_TO_PREF = {
+        "Pause": "Key.pause", "Insert": "Key.insert", "Delete": "Key.delete",
+        "Home": "Key.home", "End": "Key.end",
+        "Prior": "Key.page_up", "Next": "Key.page_down",
+        "Scroll_Lock": "Key.scroll_lock", "Print": "Key.print_screen",
+        "Caps_Lock": "Key.caps_lock", "Num_Lock": "Key.num_lock",
+        "space": "Key.space", "Return": "Key.enter", "BackSpace": "Key.backspace",
+        "Tab": "Key.tab",
+        "Up": "Key.up", "Down": "Key.down", "Left": "Key.left", "Right": "Key.right",
+        **{f"F{i}": f"Key.f{i}" for i in range(1, 13)},
+    }
+    _CAPTURE_MODIFIERS = {
+        "Shift_L", "Shift_R", "Control_L", "Control_R",
+        "Alt_L", "Alt_R", "Win_L", "Win_R", "Super_L", "Super_R",
+    }
+
     def __init__(self, prefs, on_save=None):
         self.prefs = prefs
         self.on_save = on_save
         self.root = None
         self.hwnd = None
+        self._capture_target = None
+        self._capture_prev = ""
+        self._capture_bind_id = None
         self.vars = {}
         self.rgb = list(prefs.get_preference("rgb_color") or [0, 212, 170])
         self.current_page = None
@@ -486,7 +506,60 @@ class SettingsGUI:
         tk.Entry(f, textvariable=v, bg=Colors.INPUT_BG, fg=Colors.INPUT_FG, relief="flat", width=width, show=show).pack(side="right", padx=15)
     def _hotkey_row(self, p, l, v):
         f = self._row_frame(p); tk.Label(f, text=l, font=FONT_BODY, fg=Colors.TEXT_MAIN, bg=Colors.CARD_BG).pack(side="left", padx=15)
-        tk.Label(f, textvariable=v, fg=Colors.TEXT_DIM, bg=Colors.CARD_BG).pack(side="right", padx=15)
+
+        def small_btn(txt, cmd):
+            return tk.Button(f, text=txt, command=cmd, bg=Colors.INPUT_BG, fg=Colors.TEXT_MAIN,
+                             relief="flat", cursor="hand2", padx=6)
+
+        small_btn("✕", lambda: v.set("")).pack(side="right", padx=(0, 15))
+        small_btn("M5", lambda: v.set("Key.mouse_5")).pack(side="right", padx=2)
+        small_btn("M4", lambda: v.set("Key.mouse_4")).pack(side="right", padx=2)
+        small_btn("Set", lambda: self._begin_hotkey_capture(v)).pack(side="right", padx=6)
+        tk.Label(f, textvariable=v, fg=Colors.TEXT_DIM, bg=Colors.CARD_BG).pack(side="right", padx=10)
+
+    def _begin_hotkey_capture(self, var):
+        if self._capture_target is not None:
+            return
+        self._capture_target = var
+        self._capture_prev = var.get()
+        var.set("Press a key… (Esc cancels)")
+        self._capture_bind_id = self.root.bind("<KeyPress>", self._on_capture_key)
+
+    def _cancel_hotkey_capture(self):
+        if self._capture_target is None:
+            return
+        try:
+            self.root.unbind("<KeyPress>", self._capture_bind_id)
+        except Exception:
+            pass
+        self._capture_target.set(self._capture_prev)
+        self._capture_target = None
+
+    def _on_capture_key(self, event):
+        var = self._capture_target
+        if var is None:
+            return "break"
+        ks = event.keysym
+        if ks in self._CAPTURE_MODIFIERS:
+            return "break"  # keep waiting for a real key
+
+        try:
+            self.root.unbind("<KeyPress>", self._capture_bind_id)
+        except Exception:
+            pass
+        self._capture_target = None
+
+        if ks == "Escape":
+            var.set(self._capture_prev)
+            return "break"
+
+        mapped = self.KEYSYM_TO_PREF.get(ks)
+        if mapped is None and len(event.char) == 1 and event.char.isprintable() and not event.char.isspace():
+            mapped = event.char.lower()
+        if mapped is None and len(ks) == 1:
+            mapped = ks.lower()
+        var.set(mapped if mapped else self._capture_prev)
+        return "break"
 
     def _color_picker_row(self, p):
         f = self._row_frame(p); tk.Label(f, text="Color", bg=Colors.CARD_BG, fg=Colors.TEXT_MAIN).pack(side="left", padx=15)
@@ -505,6 +578,9 @@ class SettingsGUI:
 
     def _save_all(self):
         try:
+            # Don't save the "Press a key…" placeholder if SAVE is hit mid-capture
+            self._cancel_hotkey_capture()
+
             # Gather all vars with proper type conversion
             for k, v in self.vars.items():
                 val = v.get()
