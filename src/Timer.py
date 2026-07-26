@@ -37,7 +37,11 @@ class Timer:
         self.FONT_DIGI_MED = safe_load_font(digi_path, 20)
         self.FONT_DIGI_SMALL = safe_load_font(digi_path, 14)
         self.FONT_HUGE = safe_load_font(digi_path, 38)
-        self.FONT_BATT = safe_load_font(digi_path, 10)
+        # Deliberately NOT the DS-DIGI face: it is a 7-segment LCD font whose
+        # digits break into disconnected bars at small sizes ('5' especially).
+        # VerdanaBold at 9px stays solid and renders "100" at 18px — almost
+        # exactly the battery icon's width, so it centres cleanly underneath.
+        self.FONT_BATT = safe_load_font(fetch_content_path('fonts/VerdanaBold.ttf'), 9)
 
         # The clock changes at most once per second but get_image is called at
         # display FPS (10x/sec) — cache the rendered frame per displayed state.
@@ -93,10 +97,9 @@ class Timer:
             left = x0 + 1 + i * (SEG_W + GAP)
             draw.rectangle((left, top + 2, left + SEG_W - 1, bot - 2), fill=on)
 
-        # Level underneath. Uses the larger 14px face — at 10px the DS-DIGI
-        # digits (notably '5') lose strokes and read as distorted.
-        draw.text((x1 + 2, 10), str(pct), font=self.FONT_DIGI_SMALL,
-                  fill=on, anchor="rt")
+        # Level centred under the icon (icon spans x0..x1+2 including the nub)
+        draw.text(((x0 + x1 + 2) // 2, 10), str(pct), font=self.FONT_BATT,
+                  fill=on, anchor="mt")
 
     def get_image(self):
         battery = self._battery()
