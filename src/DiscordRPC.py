@@ -3,6 +3,7 @@ Discord IPC Client — Reads mic mute/deaf state with full OAuth support.
 """
 import json
 import struct
+import threading
 import uuid
 import logging
 import time
@@ -41,6 +42,9 @@ class DiscordIPC:
         self._last_voice_state = {"mute": False, "deaf": False}
         self._last_poll_time = 0  # Throttle GET_VOICE_SETTINGS polls
         self._user_tag = None
+        # set_mute can be called from the hotkey worker thread while the RPC
+        # thread is polling; serialize pipe writes so frames never interleave.
+        self._write_lock = threading.Lock()
 
 
     @property
@@ -197,8 +201,9 @@ class DiscordIPC:
     def _send(self, opcode, payload):
         data = json.dumps(payload).encode("utf-8")
         header = struct.pack("<II", opcode, len(data))
-        self._pipe.write(header + data)
-        self._pipe.flush()
+        with self._write_lock:
+            self._pipe.write(header + data)
+            self._pipe.flush()
 
     def _recv(self, timeout=0.1):
         """Non-blocking read from the IPC pipe."""

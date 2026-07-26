@@ -53,6 +53,9 @@ class VolumeOverlay:
         self._discord_muted = None   # None = unknown/not connected, True/False = mute state
         self._discord_deafened = None
         self._discord_connected = False  # True when IPC pipe is connected
+        # Callback(muted: bool) -> bool, set by DisplayManager. Routes the mute
+        # hotkey to Discord's SET_VOICE_SETTINGS when the IPC pipe is connected.
+        self._discord_toggle_cb = None
         
         # Initial state fetch to prevent showing overlay on startup
         self._silent_init()
@@ -223,14 +226,28 @@ class VolumeOverlay:
 
     def toggle_mic_mute(self):
         """Toggle mic mute state.
-        
-        If Discord IPC is connected, this is a no-op — Discord handles muting.
-        Otherwise falls back to system mic mute (legacy behavior).
+
+        If Discord IPC is connected, the toggle is routed to Discord itself
+        (which then drives system mics via the RPC sync loop). If that fails
+        (e.g. not authenticated), falls back to system mic mute.
         """
-        # If Discord is connected, don't touch system mics — Discord handles it
-        if self._discord_connected:
-            logger.info("Discord connected — mic mute is handled by Discord, skipping system toggle")
-            return
+        if self._discord_connected and self._discord_toggle_cb:
+            target = not bool(self._discord_muted or self._discord_deafened)
+            try:
+                sent = self._discord_toggle_cb(target)
+            except Exception as e:
+                logger.warning("Discord mute toggle failed: %s", e)
+                sent = False
+            if sent:
+                # Optimistic UI so the OLED doesn't lag behind the keypress;
+                # the RPC loop confirms/corrects via VOICE_SETTINGS_UPDATE.
+                self._discord_muted = target
+                self._last_mic_mute = target
+                if time() - self.app_start_time > 4.0:
+                    self._last_change = time()
+                logger.info(f"Mute hotkey routed to Discord: mute={target}")
+                return
+            logger.info("Discord connected but SET_VOICE_SETTINGS failed — falling back to system mic toggle")
         
         # --- LEGACY FALLBACK: System mic mute when Discord is NOT running ---
         coinit_done = False

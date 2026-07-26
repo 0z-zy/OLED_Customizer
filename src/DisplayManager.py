@@ -117,11 +117,16 @@ class DisplayManager:
             extension_receiver=self.extension_receiver
         )
 
+        # Route the mute hotkey to Discord whenever its IPC pipe is connected
+        # (otherwise the hotkey was a silent no-op while Discord was running)
+        self.volume_overlay._discord_toggle_cb = self._discord_ipc.set_mute
+
         # Bi-directional sync tracking
         self._hid_listener = None
         self._last_discord_state = None
         self._last_hw_state = None
         self._last_hw_event_ts = 0.0
+        self._sync_lockout_until = 0.0
         self._discord_disconnect_ts = 0.0
         self._set_headset_hid_sync_enabled(
             bool(self.user_preferences.get_preference("headset_hid_sync_enabled"))
@@ -1320,46 +1325,64 @@ class DisplayManager:
                 
                 if voice:
                     # --- DIRECT EVENT-BASED SYNC LOGIC ---
+                    # The lockout window suppresses echo events while one side
+                    # is still propagating a change to the other (prevents the
+                    # headset<->Discord mute ping-pong).
                     new_discord_mute = bool(voice["mute"] or voice["deaf"])
                     new_hw_mute = self._hid_listener._last_state if self._hid_listener else None
                     new_hw_event_ts = self._hid_listener._last_hw_ts if self._hid_listener else 0.0
-                    
+                    now = time()
+
                     # 1. Did Discord change?
                     if new_discord_mute != self._last_discord_state:
-                        logger.info(f"[DISCORD-SYNC] Discord state changed: {self._last_discord_state} -> {new_discord_mute}")
-                        self._last_discord_state = new_discord_mute
-                        self._last_hw_state = new_discord_mute
-                        self._last_hw_event_ts = new_hw_event_ts
-                        
-                        self.volume_overlay.set_discord_mute(voice["mute"], voice["deaf"], True)
-                        if self._hid_listener:
-                            self._hid_listener.set_hardware_mute(new_discord_mute)
-                            
+                        if now > self._sync_lockout_until:
+                            logger.info(f"[DISCORD-SYNC] Discord state changed: {self._last_discord_state} -> {new_discord_mute}")
+                            self._last_discord_state = new_discord_mute
+                            self._last_hw_state = new_discord_mute
+                            self._last_hw_event_ts = new_hw_event_ts
+
+                            # Prevent stale hardware echoes from overriding this change
+                            self._sync_lockout_until = now + 1.2
+
+                            self.volume_overlay.set_discord_mute(voice["mute"], voice["deaf"], True)
+                            if self._hid_listener:
+                                self._hid_listener.set_hardware_mute(new_discord_mute)
+
                     # 2. Did Hardware change?
                     elif (
                         new_hw_mute is not None
                         and new_hw_event_ts > self._last_hw_event_ts
                         and new_hw_mute != self._last_hw_state
                     ):
-                        logger.info(f"[HARDWARE-SYNC] Hardware button pressed: {self._last_hw_state} -> {new_hw_mute}")
-                        self._last_hw_state = new_hw_mute
-                        self._last_discord_state = new_hw_mute
-                        self._last_hw_event_ts = new_hw_event_ts
-                        
-                        self.volume_overlay.set_discord_mute(new_hw_mute, False, True)
-                        self._discord_ipc.set_mute(new_hw_mute)
-                        
+                        if now > self._sync_lockout_until:
+                            logger.info(f"[HARDWARE-SYNC] Hardware button pressed: {self._last_hw_state} -> {new_hw_mute}")
+                            self._last_hw_state = new_hw_mute
+                            self._last_discord_state = new_hw_mute
+                            self._last_hw_event_ts = new_hw_event_ts
+
+                            # Discord takes ~1s to reflect the change
+                            self._sync_lockout_until = now + 1.5
+
+                            self.volume_overlay.set_discord_mute(new_hw_mute, False, True)
+                            self._discord_ipc.set_mute(new_hw_mute)
+                        else:
+                            # Hardware event during a sync we initiated: consume
+                            # it so it can't bounce back and override the change.
+                            self._last_hw_state = new_hw_mute
+                            self._last_hw_event_ts = new_hw_event_ts
+
                     else:
                         # 3. Steady State
-                        self._last_discord_state = new_discord_mute
-                        if new_hw_mute is not None:
-                            self._last_hw_state = new_hw_mute
-                        if new_hw_event_ts > self._last_hw_event_ts:
-                            self._last_hw_event_ts = new_hw_event_ts
-                            
-                        self.volume_overlay._discord_muted = voice["mute"]
-                        self.volume_overlay._discord_deafened = voice["deaf"]
-                        self.volume_overlay._discord_connected = True
+                        if now > self._sync_lockout_until:
+                            self._last_discord_state = new_discord_mute
+                            if new_hw_mute is not None:
+                                self._last_hw_state = new_hw_mute
+                            if new_hw_event_ts > self._last_hw_event_ts:
+                                self._last_hw_event_ts = new_hw_event_ts
+
+                            self.volume_overlay._discord_muted = voice["mute"]
+                            self.volume_overlay._discord_deafened = voice["deaf"]
+                            self.volume_overlay._discord_connected = True
 
                 else:
                     # Discord poll failed or pipe closed
