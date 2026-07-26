@@ -1,17 +1,23 @@
+const DEFAULT_PORT = 8888; // Must match "discord_local_port" in the app's config.json
+const EXTRA_PORT = 2409;   // Secondary consumer (e.g. MuteSync)
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'sendMediaData') {
-        const data = message.data;
-        const body = JSON.stringify(data);
+        const body = JSON.stringify(message.data);
         const headers = { 'Content-Type': 'application/json' };
 
-        // Send to OLED Customizer (port 1231, as set in config.json discord_local_port)
-        fetch('http://127.0.0.1:1231/extension_data', {
-            method: 'POST', headers, body
-        }).catch(() => { /* app not running, ignore */ });
+        chrome.storage.local.get({ port: DEFAULT_PORT }).then(({ port }) => {
+            const target = parseInt(port, 10) || DEFAULT_PORT;
 
-        // Send to additional app (port 2409)
-        fetch('http://127.0.0.1:2409/extension_data', {
-            method: 'POST', headers, body
-        }).catch(() => { /* app not running, ignore */ });
+            fetch(`http://127.0.0.1:${target}/extension_data`, {
+                method: 'POST', headers, body
+            }).catch(() => { /* app not running, ignore */ });
+
+            if (target !== EXTRA_PORT) {
+                fetch(`http://127.0.0.1:${EXTRA_PORT}/extension_data`, {
+                    method: 'POST', headers, body
+                }).catch(() => { /* app not running, ignore */ });
+            }
+        });
     }
 });

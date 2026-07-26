@@ -13,11 +13,42 @@ class ExtensionData:
         self.last_winner_id = None
         self._lock = threading.Lock()
 
+    @staticmethod
+    def _sanitize(new_data):
+        """Coerce an incoming payload into a well-typed dict.
+        Anything on localhost can POST here, so never trust field types.
+        Returns None if the payload is not usable at all."""
+        if not isinstance(new_data, dict):
+            return None
+
+        def _num(val):
+            try:
+                v = float(val)
+                # NaN/inf would poison int() conversions downstream
+                if v != v or v in (float("inf"), float("-inf")):
+                    return 0.0
+                return max(0.0, v)
+            except (TypeError, ValueError):
+                return 0.0
+
+        return {
+            "title": str(new_data.get("title") or ""),
+            "artist": str(new_data.get("artist") or ""),
+            "artwork": str(new_data.get("artwork") or ""),
+            "progress": _num(new_data.get("progress")),
+            "duration": _num(new_data.get("duration")),
+            "playing": new_data.get("playing") is True,
+            "isFocused": new_data.get("isFocused") is True,
+            "tabId": str(new_data.get("tabId") or "default"),
+        }
+
     def update(self, new_data):
-        tab_id = new_data.get("tabId", "default")
+        data = self._sanitize(new_data)
+        if data is None:
+            return
         with self._lock:
-            self.tabs[tab_id] = {
-                "data": new_data,
+            self.tabs[data["tabId"]] = {
+                "data": data,
                 "last_update": time.time()
             }
 

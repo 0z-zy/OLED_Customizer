@@ -726,11 +726,19 @@ class DisplayManager:
 
     def run(self):
         while self._running:
+            try:
+                self._run_once()
+            except Exception:
+                # One bad frame/payload must never kill the whole app
+                logger.exception("Main loop iteration failed; continuing")
+                sleep(1.0)
+
+    def _run_once(self):
             if not self.enabled:
                 sleep(1 / self.fps)
                 if self.state != -1: # Reset state visualization if disabled
                    pass
-                continue
+                return
 
             # Check if SteelSeries GG is running
             gg_running = is_process_running(["SteelSeriesGG.exe", "SteelSeriesGGClient.exe", "SteelSeriesEngine3.exe"])
@@ -758,8 +766,8 @@ class DisplayManager:
                          else:
                              logger.warning("Auto-launch enabled but SteelSeries GG path not found.")
 
-                 sleep(2) 
-                 continue
+                 sleep(2)
+                 return
             
             # If it was NOT running and NOW it is, trigger a reset
             if not self._gg_was_running:
@@ -800,8 +808,8 @@ class DisplayManager:
                 self._extension_last_data_ms = now_ms
                 is_playing = bool(ext_data.get("playing"))
                 
-                prog = int(ext_data.get("progress") * 1000)
-                dur = int(ext_data.get("duration") * 1000)
+                prog = int((ext_data.get("progress") or 0) * 1000)
+                dur = int((ext_data.get("duration") or 0) * 1000)
                 
                 # Never let SMTC override extension timing or play state.
                 # The browser extension holds the absolute source of truth.
@@ -822,8 +830,8 @@ class DisplayManager:
                 payload = {
                     "title": ext_data.get("title"),
                     "artist": ext_data.get("artist"),
-                    "progress": int(ext_data.get("progress") * 1000),
-                    "duration": int(ext_data.get("duration") * 1000),
+                    "progress": int((ext_data.get("progress") or 0) * 1000),
+                    "duration": int((ext_data.get("duration") or 0) * 1000),
                     "paused": not is_playing,
                     "source": "youtube"
                 }
