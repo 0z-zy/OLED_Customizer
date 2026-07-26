@@ -37,6 +37,7 @@ class Timer:
         self.FONT_DIGI_MED = safe_load_font(digi_path, 20)
         self.FONT_DIGI_SMALL = safe_load_font(digi_path, 14)
         self.FONT_HUGE = safe_load_font(digi_path, 38)
+        self.FONT_BATT = safe_load_font(digi_path, 10)
 
         # The clock changes at most once per second but get_image is called at
         # display FPS (10x/sec) — cache the rendered frame per displayed state.
@@ -60,6 +61,37 @@ class Timer:
         except Exception:
             return None
         return val if isinstance(val, int) and 0 <= val <= 100 else None
+
+    def _draw_battery(self, draw, pct):
+        """Vertical battery icon in the top-right corner, level printed under it.
+
+            ▁▁        <- terminal nub
+           |██|       <- body, filled from the bottom
+           |██|
+            51        <- percentage
+        """
+        w = self.config.width
+        on, off = self.config.primary, self.config.secondary
+
+        # Clear the corner first: the Big Timer face is wide enough to run
+        # underneath the icon, and overlapping strokes make both unreadable.
+        draw.rectangle((w - 21, 0, w - 1, 24), fill=off)
+
+        x0, x1 = w - 9, w - 3        # 7px wide body
+        top, bot = 2, 14             # 13px tall body
+
+        draw.rectangle((x0 + 2, 0, x1 - 2, 1), fill=on)        # nub
+        draw.rectangle((x0, top, x1, bot), outline=on)          # body
+
+        # Fill upward from the bottom, proportional to charge
+        inner_top, inner_bot = top + 1, bot - 1
+        inner_h = inner_bot - inner_top + 1
+        fill_h = int(round(inner_h * max(0, min(100, pct)) / 100.0))
+        if fill_h > 0:
+            draw.rectangle((x0 + 1, inner_bot - fill_h + 1, x1 - 1, inner_bot), fill=on)
+
+        # Level underneath, right-aligned with the icon
+        draw.text((x1 + 1, 16), str(pct), font=self.FONT_BATT, fill=on, anchor="rt")
 
     def get_image(self):
         battery = self._battery()
@@ -183,10 +215,7 @@ class Timer:
                 )
 
         if battery is not None:
-            # Top-left corner: free in every clock style (Standard/Big/Date
-            # centre their text, Analog's face is centred at x=64).
-            draw.text((1, 0), f"{battery}%", font=self.FONT_DIGI_SMALL,
-                      fill=self.config.primary, anchor="lt")
+            self._draw_battery(draw, battery)
 
         self._cache_key = key
         self._cached_image = image
