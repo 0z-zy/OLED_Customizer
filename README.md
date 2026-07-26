@@ -2,7 +2,7 @@
 
 **The ultimate music and system dashboard for your SteelSeries Keyboard.**
 
-![Version](https://img.shields.io/badge/version-1.4.8-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-1.7.0-blue?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey?style=for-the-badge)
 
@@ -17,7 +17,6 @@ OLED Customizer transforms your keyboard's small screen into a powerful, high-co
 - [🎨 Advanced Customization](#-advanced-customization)
 - [🛠️ Quick Setup](#️-quick-setup)
 - [🎵 Spotify API Setup](#-spotify-api-setup)
-- [🌐 Browser Sync](#-browser-sync-installation)
 - [📚 Acknowledgments](#-acknowledgments)
 
 ---
@@ -26,7 +25,7 @@ OLED Customizer transforms your keyboard's small screen into a powerful, high-co
 
 ### 🎵 Dynamic Media Dashboard
 
-- **Spotify & YouTube Support**: Real-time integration with Spotify (via API) and Browser media (via SMTC).
+- **Spotify & YouTube Support**: Real-time integration with Spotify (via API) and Windows media (via SMTC).
 - **Intelligent Switching**: Seamlessly transitions between music info and the clock.
 - **Pixel-Perfect Icons**: Custom YouTube and Media icons designed specifically for the 128x40 display.
 
@@ -135,20 +134,6 @@ To sync with Spotify, you need to create a free application on the Spotify Devel
     - Enable **"Spotify Integration"**.
     - Paste your credentials and set the port to `2408`.
 3. Click **SAVE** and restart the app.
-
----
-
-## 🌐 Browser Sync Installation
-
-To get high-precision data from YouTube and other web players:
-
-1. Download **`OLED-Customizer-Extension.crx`** from [Releases](https://github.com/0z-zy/OLED_Customizer/releases).
-2. Open your browser's **Extensions** page (typically `chrome://extensions` or `edge://extensions`).
-3. Enable **Developer mode** (top right toggle).
-4. **Drag and drop** the `.crx` file anywhere onto the Extensions page to install.
-
-> [!NOTE]
-> Browser Sync bypasses Windows SMTC limitations, providing accurate progress bars and metadata for YouTube videos.
 
 ---
 
