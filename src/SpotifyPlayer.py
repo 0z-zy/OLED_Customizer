@@ -213,10 +213,6 @@ class SpotifyPlayer:
     # Classic layout: Icon top-left, Title below icon, Artist below title, 
     # Progress bar at bottom with timestamps on sides.
     def _draw_standard(self, draw, image):
-        # Reset text positions to defaults
-        self.title.y = 15
-        self.artist.y = 3
-        
         self.artist.draw_next_step(draw)
         self.title.draw_next_step(draw)
 

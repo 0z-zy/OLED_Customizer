@@ -20,11 +20,6 @@ from .HIDListener import HIDListener
 from src.utils import is_process_running, find_steelseries_gg_path, launch_process
 import asyncio
 
-try:
-    from pynput import keyboard
-except ImportError:
-    keyboard = None
-
 logger = logging.getLogger("OLED Customizer")
 
 
@@ -137,9 +132,6 @@ class DisplayManager:
 
         # polling timers
         self._last_spotify_poll_ms = now_ms
-        self._last_yt_poll_ms = now_ms
-
-        self._yt_poll_ms = 200
 
         # SOURCE STATE
         self._spotify_last_seen_ms = 0
@@ -811,11 +803,7 @@ class DisplayManager:
             # 1) YT poll (hızlı)
             self.volume_overlay.update()
 
-            # Media poll - Extension (Priority) then SMTC
-            if now_ms - self._last_yt_poll_ms >= self._yt_poll_ms:
-                self._last_yt_poll_ms = now_ms
-                
-            # Fetch both sources
+            # Media poll: fetch both sources (extension has priority over SMTC)
             ext_data = self.extension_receiver.get_latest_data()
             
             with self._smtc_lock:

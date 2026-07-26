@@ -15,11 +15,3 @@ class Config:
 
         for key, value in self.DEFAULT_CONFIG.items():
             setattr(self, key, config.get(key, value))
-
-    def save_config(self, config_file):
-        with open(config_file, "w") as file:
-            file.write(self.to_json())
-
-    def read_config(self, config_file):
-        with open(config_file, "r") as file:
-            self.from_json(file.read())

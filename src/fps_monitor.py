@@ -1,11 +1,8 @@
 
 import ctypes
-import ctypes.wintypes as wintypes
 from threading import Thread, Lock
 import time
 import logging
-import win32gui
-import win32process
 import os
 import sys
 

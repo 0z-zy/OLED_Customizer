@@ -7,15 +7,13 @@ import tkinter as tk
 from tkinter import ttk, colorchooser, messagebox
 import os
 import logging
-import shutil
 import ctypes
-from datetime import datetime
 import threading
 
 logger = logging.getLogger("OLED Customizer.Settings")
 from src.UserPreferences import UserPreferences
 from src.utils import set_startup, is_startup_enabled, fetch_app_data_path as f_app_data
-from src.updater import is_update_available, start_update_process
+from src.updater import is_update_available
 
 # --- THEME CONSTANTS ---
 class Colors:

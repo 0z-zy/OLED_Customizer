@@ -9,8 +9,6 @@ import logging
 import time
 import msvcrt
 import win32pipe
-import win32file
-import pywintypes
 import requests
 
 logger = logging.getLogger("OLED Customizer.DiscordRPC")
