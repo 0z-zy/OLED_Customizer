@@ -112,10 +112,6 @@ class DisplayManager:
             extension_receiver=self.extension_receiver
         )
 
-        # Route the mute hotkey to Discord whenever its IPC pipe is connected
-        # (otherwise the hotkey was a silent no-op while Discord was running)
-        self.volume_overlay._discord_toggle_cb = self._discord_ipc.set_mute
-
         # Bi-directional sync tracking
         self._hid_listener = None
         self._last_discord_state = None
@@ -123,6 +119,14 @@ class DisplayManager:
         self._last_hw_event_ts = 0.0
         self._sync_lockout_until = 0.0
         self._discord_disconnect_ts = 0.0
+        self._last_hotkey_req = None
+        self._last_hotkey_req_ts = 0.0
+
+        # Route the mute hotkey to Discord whenever its IPC pipe is connected
+        # (otherwise the hotkey was a silent no-op while Discord was running).
+        # Assigned after the sync state above exists — the hotkey worker thread
+        # is already running and could fire mid-init.
+        self.volume_overlay._discord_toggle_cb = self._hotkey_set_discord_mute
         self._set_headset_hid_sync_enabled(
             bool(self.user_preferences.get_preference("headset_hid_sync_enabled"))
         )
@@ -260,6 +264,14 @@ class DisplayManager:
         Actions like toggle_mic_mute use COM calls that can take 100ms+,
         which would cause the hook to be silently removed by Windows.
         """
+        # All mic/COM work from hotkeys happens on this thread, and
+        # _sync_all_capture_mics expects COM to be live on its caller.
+        try:
+            import pythoncom
+            pythoncom.CoInitialize()
+        except Exception as e:
+            logger.debug("Hotkey worker CoInitialize failed: %s", e)
+
         while self._running:
             try:
                 action = self._hotkey_action_queue.get(timeout=2.0)
@@ -1300,6 +1312,44 @@ class DisplayManager:
             except Exception:
                 pass
 
+    def _hotkey_set_discord_mute(self, muted):
+        """Apply a mute-hotkey press as ONE transaction against Discord.
+
+        The critical part is priming _last_discord_state/_last_hw_state and
+        arming the lockout BEFORE Discord echoes the change back. Without it,
+        the RPC loop treats our own command's VOICE_SETTINGS_UPDATE echo as a
+        fresh external Discord action, and the 10Hz steady-state branch wipes
+        the optimistic UI state in the meantime — which is what made presses
+        appear to do nothing and then flip a beat later.
+
+        Returns True if the command was sent (caller falls back to the system
+        mic path when False).
+        """
+        if not self._discord_ipc.set_mute(muted):
+            return False
+
+        now = time()
+        # Mark this change as OURS so the echo is absorbed, not reprocessed
+        self._last_discord_state = muted
+        self._last_hw_state = muted
+        self._sync_lockout_until = now + 1.2
+        self._last_hotkey_req = muted
+        self._last_hotkey_req_ts = now
+
+        # The RPC loop's sync path is suppressed for this change, so perform the
+        # work it would have done: gate the real Windows capture devices...
+        try:
+            self.volume_overlay._sync_all_capture_mics(muted, source="Hotkey")
+        except Exception as e:
+            logger.debug("Hotkey system-mic sync failed: %s", e)
+        # ...and mirror it onto the headset LED.
+        if self._hid_listener:
+            try:
+                self._hid_listener.set_hardware_mute(muted)
+            except Exception as e:
+                logger.debug("Hotkey headset sync failed: %s", e)
+        return True
+
     def _discord_rpc_loop(self):
         """Background thread that polls Discord's local IPC for mic mute/deaf state.
         
@@ -1388,6 +1438,18 @@ class DisplayManager:
                     # 1. Did Discord change?
                     if new_discord_mute != self._last_discord_state:
                         if now > self._sync_lockout_until:
+                            # Diagnostic: Discord contradicting a very recent
+                            # hotkey request means Discord itself refused the
+                            # SET (e.g. self-mute outside a voice channel),
+                            # not that we are fighting ourselves.
+                            if (self._last_hotkey_req is not None
+                                    and (now - self._last_hotkey_req_ts) < 3.0
+                                    and new_discord_mute != self._last_hotkey_req):
+                                logger.warning(
+                                    "[DISCORD-SYNC] Discord reverted our hotkey request "
+                                    "(asked mute=%s, Discord reports mute=%s) — Discord refused the change",
+                                    self._last_hotkey_req, new_discord_mute,
+                                )
                             logger.info(f"[DISCORD-SYNC] Discord state changed: {self._last_discord_state} -> {new_discord_mute}")
                             self._last_discord_state = new_discord_mute
                             self._last_hw_state = new_discord_mute
