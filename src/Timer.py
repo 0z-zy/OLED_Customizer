@@ -78,8 +78,8 @@ class Timer:
         on, off = self.config.primary, self.config.secondary
 
         x1 = w - 4                   # body right edge (nub sits outside it)
-        x0 = x1 - 16                 # 17px wide
-        top, bot = 0, 8              # 9px tall
+        x0 = x1 - 18                 # 19px wide
+        top, bot = 1, 9              # 9px tall, 1px clear of the screen edge
 
         # Clear the corner first: the Big Timer face is wide enough to run
         # underneath the icon, and overlapping strokes make both unreadable.
@@ -90,15 +90,17 @@ class Timer:
 
         # 4 discrete segments (25% each) rather than one continuous fill —
         # a solid block reads as a single bar and you can't judge the level
-        # at a glance. 4 x 3px bars + 3 x 1px gaps == the 15px interior.
+        # at a glance. There is a 1px gap INSIDE the border as well as between
+        # segments; without it the end segments merge with the outline and the
+        # icon looks lopsided. 2px border + 2px padding + 4x3px + 3x1px = 19.
         SEGMENTS, SEG_W, GAP = 4, 3, 1
         lit = max(0, min(SEGMENTS, -(-max(0, min(100, pct)) // (100 // SEGMENTS))))
         for i in range(lit):
-            left = x0 + 1 + i * (SEG_W + GAP)
+            left = x0 + 2 + i * (SEG_W + GAP)
             draw.rectangle((left, top + 2, left + SEG_W - 1, bot - 2), fill=on)
 
         # Level centred under the icon (icon spans x0..x1+2 including the nub)
-        draw.text(((x0 + x1 + 2) // 2, 10), str(pct), font=self.FONT_BATT,
+        draw.text(((x0 + x1 + 2) // 2, 11), str(pct), font=self.FONT_BATT,
                   fill=on, anchor="mt")
 
     def get_image(self):
