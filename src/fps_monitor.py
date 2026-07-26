@@ -43,8 +43,9 @@ class FPSMonitor:
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             
         self._dll_path = os.path.join(base_dir, "src", "lib", "PresentMon.dll")
-        
-        self.start()
+
+        # Lazy: an ETW capture of every process is not free. The owner calls
+        # start()/stop() based on the show_game_fps preference.
 
     def start(self):
         if self._running: return

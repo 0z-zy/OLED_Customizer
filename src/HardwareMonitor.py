@@ -220,11 +220,17 @@ class HardwareMonitor:
         interval = preferences.get_preference("hw_polling_interval") or 1000
         _lhm_worker.start(interval)
         
-        self.fps_monitor = FPSMonitor()
         self.show_fps = bool(preferences.get_preference("show_game_fps"))
+        self.fps_monitor = FPSMonitor()
+        if self.show_fps:
+            self.fps_monitor.start()
 
     def update_preferences(self, preferences):
         self.show_fps = bool(preferences.get_preference("show_game_fps"))
+        if self.show_fps:
+            self.fps_monitor.start()
+        else:
+            self.fps_monitor.stop()
         interval = preferences.get_preference("hw_polling_interval") or 1000
         _lhm_worker._polling_interval = interval
         if not _lhm_worker._running:

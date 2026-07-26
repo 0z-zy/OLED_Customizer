@@ -185,9 +185,24 @@ def open_install_folder(icon):
     
     os.startfile(path_to_open)
 
+# pystray re-evaluates `checked` lambdas every time the menu is shown, and
+# is_startup_enabled() spawns a schtasks subprocess — cache it briefly.
+_startup_state = {"ts": 0.0, "val": False}
+
+
+def cached_is_startup_enabled():
+    import time as _t
+    now = _t.time()
+    if now - _startup_state["ts"] > 10.0:
+        _startup_state["val"] = is_startup_enabled()
+        _startup_state["ts"] = now
+    return _startup_state["val"]
+
+
 def toggle_startup(icon):
     current_state = is_startup_enabled()
     set_startup(not current_state)
+    _startup_state["ts"] = 0.0  # invalidate cache so the checkmark refreshes
     # No need to save to UserPreferences as this is a registry state, but we could sync them if we wanted.
     # The checkmark will query the registry freshly.
     pass # Menu update happens automatically? No, pystray dynamic menu needs a callback or reload
@@ -509,7 +524,7 @@ def run_systray_async(display_manager):
         Item(
             "Run at Startup",
             toggle_startup,
-            checked=lambda item: is_startup_enabled(),
+            checked=lambda item: cached_is_startup_enabled(),
         ),
         Item(
             "Enable Debug Logging",

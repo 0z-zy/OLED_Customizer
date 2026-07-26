@@ -15,7 +15,7 @@ def fetch_content_path(relative_path: str) -> str:
     relative_path = os.path.normpath(relative_path.lstrip("./\\"))
 
     possible_bases = []
-    
+
     if getattr(sys, "frozen", False):
         # 1. PyInstaller MEIPASS
         if hasattr(sys, "_MEIPASS"):
@@ -25,7 +25,7 @@ def fetch_content_path(relative_path: str) -> str:
     else:
         # 3. Source directory
         possible_bases.append(os.path.dirname(os.path.dirname(__file__)))
-    
+
     # 4. Final fallback: Current Working Directory
     possible_bases.append(os.getcwd())
 
@@ -33,7 +33,7 @@ def fetch_content_path(relative_path: str) -> str:
         full_path = os.path.normpath(os.path.join(base, "content", relative_path))
         if os.path.exists(full_path):
             return full_path
-            
+
     # If not found, return the most likely path anyway (and let the caller fail or use fallback)
     default_base = possible_bases[0] if possible_bases else "."
     return os.path.normpath(os.path.join(default_base, "content", relative_path))
@@ -43,37 +43,50 @@ def convert_color(o):
     return 1 if o >= 1 else 0
 
 
-def convert_to_bitmap(image_data):
+def convert_to_bitmap(image):
     """
-    Faster conversion from PIL image data to SteelSeries binary bitmap.
-    PIL "1" mode image.getdata() returns 0 or 255.
+    Convert a PIL mode-"1" image to the SteelSeries binary bitmap.
+
+    PIL's tobytes() already packs 8 pixels/byte MSB-first (rows padded to a
+    byte boundary — a non-issue at 128px width), which is exactly the
+    GameSense format, so the conversion is a single C call.
+
+    Accepts a pixel sequence (legacy image.getdata() callers) as fallback.
     """
+    if hasattr(image, "tobytes"):
+        return image.tobytes()
+
+    # Legacy path: sequence of 0/255 pixel values
     res = bytearray()
-    # Process 8 pixels at a time into one byte
-    for i in range(0, len(image_data), 8):
+    for i in range(0, len(image), 8):
         byte = 0
         for j in range(8):
-            if image_data[i + j] > 0:
-                # SteelSeries format: MSB is the leftmost pixel in the 8-pixel block
+            if image[i + j] > 0:
                 byte |= (1 << (7 - j))
         res.append(byte)
     return bytes(res)
 
 
+# Media source icons are drawn on every rendered frame — load once, not per frame.
+_icon_cache = {}
+
+
+def _get_cached_icon(filename):
+    icon = _icon_cache.get(filename)
+    if icon is None:
+        icon_path = fetch_content_path(f"assets/icons/{filename}")
+        icon = Image.open(icon_path).convert("1")
+        _icon_cache[filename] = icon
+    return icon
+
+
 def draw_spotify(image, position):
-    # content/assets/spotify-18.png bekliyoruz
-    icon_path = fetch_content_path("assets/icons/spotify-18.png")
-    with Image.open(icon_path).convert("1") as im:
-        image.paste(im, position)
+    image.paste(_get_cached_icon("spotify-18.png"), position)
 
 
 def draw_youtube(image, position):
-    # content/assets/youtube-18.png bekliyoruz
-    icon_path = fetch_content_path("assets/icons/youtube-18.png")
-    with Image.open(icon_path).convert("1") as im:
-        image.paste(im, position)
+    image.paste(_get_cached_icon("youtube-18.png"), position)
+
+
 def draw_generic_media(image, position):
-    # content/assets/media-18.png bekliyoruz
-    icon_path = fetch_content_path("assets/icons/media-18.png")
-    with Image.open(icon_path).convert("1") as im:
-        image.paste(im, position)
+    image.paste(_get_cached_icon("media-18.png"), position)

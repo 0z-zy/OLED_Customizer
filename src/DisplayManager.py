@@ -163,6 +163,8 @@ class DisplayManager:
         # If startup registration failed (GG not up yet), start False so the
         # run loop triggers a re-registration as soon as GG is detected
         self._gg_was_running = bool(self.steelseries_api.address)
+        self._gg_check_ts = 0.0
+        self._gg_running_cached = False
         self._last_rgb_send_ms = 0
 
         # STICKY SOURCE logic
@@ -755,8 +757,13 @@ class DisplayManager:
                    pass
                 return
 
-            # Check if SteelSeries GG is running
-            gg_running = is_process_running(["SteelSeriesGG.exe", "SteelSeriesGGClient.exe", "SteelSeriesEngine3.exe"])
+            # Check if SteelSeries GG is running. Cached: psutil's full process
+            # scan is far too expensive to run 10x per second.
+            now_check = time()
+            if now_check - self._gg_check_ts > 3.0:
+                self._gg_running_cached = is_process_running(["SteelSeriesGG.exe", "SteelSeriesGGClient.exe", "SteelSeriesEngine3.exe"])
+                self._gg_check_ts = now_check
+            gg_running = self._gg_running_cached
             
             if not gg_running:
                  self._gg_was_running = False
@@ -915,19 +922,19 @@ class DisplayManager:
             # Calculator overlay takes priority over everything when active
             if self._calculator_active:
                 img = self.calculator.get_image()
-                frame_data = convert_to_bitmap(img.getdata())
+                frame_data = convert_to_bitmap(img)
             # Hardware monitor overlay > volume overlay > everything
             elif self.display_hw_monitor or self.hardware_monitor.should_display():
                 img = self.hardware_monitor.get_image()
-                frame_data = convert_to_bitmap(img.getdata())
+                frame_data = convert_to_bitmap(img)
             # volume overlay > everything else
             elif self.volume_overlay.should_display():
                 img = self.volume_overlay.get_image()
-                frame_data = convert_to_bitmap(img.getdata())
+                frame_data = convert_to_bitmap(img)
             else:
                 if self.state == State.SHOW_CLOCK and self.display_clock:
                     img = self.timer.get_image()
-                    frame_data = convert_to_bitmap(img.getdata())
+                    frame_data = convert_to_bitmap(img)
                 elif self.state == State.SHOW_PLAYER and self.display_player:
                     # Use lock with timeout to prevent deadlock hangs
                     if self._lock.acquire(timeout=0.1):
@@ -939,7 +946,7 @@ class DisplayManager:
                         img = None
                         
                     if img:
-                        frame_data = convert_to_bitmap(img.getdata())
+                        frame_data = convert_to_bitmap(img)
 
                     # paused threshold (Yedek kontrol, yukarıdaki mantık bunu zaten çözüyor ama kalsın)
                     if self.player.pause_started and (int(time() * 1000) - self.player.pause_started) > self.timer_threshold:
@@ -1198,6 +1205,13 @@ class DisplayManager:
         if hasattr(self, "_discord_ipc"):
             try:
                 self._discord_ipc.close()
+            except Exception:
+                pass
+
+        # Stop hardware monitoring (LHM worker + PresentMon ETW session)
+        if hasattr(self, "hardware_monitor"):
+            try:
+                self.hardware_monitor.stop()
             except Exception:
                 pass
 

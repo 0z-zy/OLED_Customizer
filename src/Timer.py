@@ -38,10 +38,26 @@ class Timer:
         self.FONT_DIGI_SMALL = safe_load_font(digi_path, 14)
         self.FONT_HUGE = safe_load_font(digi_path, 38)
 
+        # The clock changes at most once per second but get_image is called at
+        # display FPS (10x/sec) — cache the rendered frame per displayed state.
+        self._cache_key = None
+        self._cached_image = None
+
     def set_style(self, style):
         self.style = style
 
     def get_image(self):
+        now = localtime()
+        if self.style == self.Style.ANALOG:
+            key = (self.style, now.tm_hour, now.tm_min,
+                   now.tm_sec if self.display_seconds else -1)
+        else:
+            t_text, d_text = self.get_current_time()
+            key = (self.style, t_text, d_text)
+
+        if key == self._cache_key and self._cached_image is not None:
+            return self._cached_image
+
         image = Image.new(
             mode="1",
             size=(self.config.width, self.config.height),
@@ -148,6 +164,8 @@ class Timer:
                     anchor="mm"
                 )
 
+        self._cache_key = key
+        self._cached_image = image
         return image
 
     def get_current_time(self):
