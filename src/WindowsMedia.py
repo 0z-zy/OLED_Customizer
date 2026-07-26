@@ -15,6 +15,19 @@ VALID_STATUSES = {
 class WindowsMedia:
     def __init__(self):
         self.manager = None
+        self._logged_once = set()
+
+    def _log_once(self, key, msg, *args):
+        """Log a recurring failure only the first time.
+
+        This runs in a 5 Hz poll loop: a permanent failure (e.g. a missing
+        winrt submodule) would otherwise write thousands of identical lines
+        and push real diagnostics out of the rotating log.
+        """
+        if key in self._logged_once:
+            return
+        self._logged_once.add(key)
+        logger.debug(msg + " (further identical messages suppressed)", *args)
 
     def _is_valid_session(self, session):
         """Check if an SMTC session is real and not stale/garbage.
@@ -45,7 +58,7 @@ class WindowsMedia:
                         # Position is at the end — track is finished, skip it
                         return False
             except Exception as e:
-                logger.debug("Timeline check failed: %s", e)  # timeline check is best-effort
+                self._log_once("timeline", "Timeline check failed: %s", e)  # best-effort
 
             # Filter 3: Staleness — if last update was >60s ago and not playing,
             # the session is stale.
@@ -57,7 +70,7 @@ class WindowsMedia:
                         if age > 60:
                             return False
                 except Exception as e:
-                    logger.debug("Staleness check failed: %s", e)  # staleness check is best-effort
+                    self._log_once("staleness", "Staleness check failed: %s", e)  # best-effort
 
             return True
         except (OSError, RuntimeError):
@@ -97,7 +110,7 @@ class WindowsMedia:
                 self.manager = None
                 return {}
             except Exception as e:
-                logger.debug("Session validation failed: %s", e)
+                self._log_once("get_sessions", "Session validation failed: %s", e)
 
             current_session = None
             
