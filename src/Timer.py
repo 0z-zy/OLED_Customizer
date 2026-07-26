@@ -49,8 +49,10 @@ class Timer:
     def get_image(self):
         now = localtime()
         if self.style == self.Style.ANALOG:
+            # use_turkish_days matters here too: analog draws the day name
             key = (self.style, now.tm_hour, now.tm_min,
-                   now.tm_sec if self.display_seconds else -1)
+                   now.tm_sec if self.display_seconds else -1,
+                   self.use_turkish_days)
         else:
             t_text, d_text = self.get_current_time()
             key = (self.style, t_text, d_text)

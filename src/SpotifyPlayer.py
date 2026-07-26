@@ -72,6 +72,13 @@ class SpotifyPlayer:
             self._start_art_fetch(self._art_url)
         self.changed = True
 
+    def clear_artwork(self):
+        """Drop current art AND invalidate in-flight fetches, so a download
+        that completes after a song change can't re-publish the old cover."""
+        self._art_seq += 1
+        self._art_url = None
+        self._art_image = None
+
     def set_artwork(self, url):
         url = (url or "").strip()
         if not url.lower().startswith(("http://", "https://")):
@@ -120,8 +127,7 @@ class SpotifyPlayer:
 
         # New song: drop stale art immediately (the caller sets the new URL,
         # if any, right after update_song)
-        self._art_url = None
-        self._art_image = None
+        self.clear_artwork()
 
         self.paused = paused
         self.song_position = song_position

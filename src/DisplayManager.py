@@ -1077,6 +1077,13 @@ class DisplayManager:
                     # to avoid 00:00/00:00 flash. Duration will come from Spotify API shortly.
                     player.title.set_text(title)
                     player.artist.set_text(artist)
+                    # Song changed: stale art must go now, exactly like update_song
+                    # does (otherwise the old cover survives and the same-song
+                    # adoption guard blocks the new URL forever)
+                    if hasattr(player, "clear_artwork"):
+                        player.clear_artwork()
+                        if "artwork" in data:
+                            player.set_artwork(data.get("artwork"))
                     player.source = source
                     player.song_position = 0
                     player.changed = True

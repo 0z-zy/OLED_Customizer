@@ -515,11 +515,24 @@ class SettingsGUI:
             return tk.Button(f, text=txt, command=cmd, bg=Colors.INPUT_BG, fg=Colors.TEXT_MAIN,
                              relief="flat", cursor="hand2", padx=6)
 
-        small_btn("✕", lambda: v.set("")).pack(side="right", padx=(0, 15))
-        small_btn("M5", lambda: v.set("Key.mouse_5")).pack(side="right", padx=2)
-        small_btn("M4", lambda: v.set("Key.mouse_4")).pack(side="right", padx=2)
+        small_btn("✕", lambda: self._assign_hotkey(v, "")).pack(side="right", padx=(0, 15))
+        small_btn("M5", lambda: self._assign_hotkey(v, "Key.mouse_5")).pack(side="right", padx=2)
+        small_btn("M4", lambda: self._assign_hotkey(v, "Key.mouse_4")).pack(side="right", padx=2)
         small_btn("Set", lambda: self._begin_hotkey_capture(v)).pack(side="right", padx=6)
         tk.Label(f, textvariable=v, fg=Colors.TEXT_DIM, bg=Colors.CARD_BG).pack(side="right", padx=10)
+
+    def _assign_hotkey(self, var, value):
+        """Directly assign a hotkey value, disarming any pending capture first
+        (otherwise SAVE's capture-cancel would revert the visible assignment)."""
+        if self._capture_target is var:
+            try:
+                self.root.unbind("<KeyPress>", self._capture_bind_id)
+            except Exception:
+                pass
+            self._capture_target = None
+        elif self._capture_target is not None:
+            self._cancel_hotkey_capture()
+        var.set(value)
 
     def _begin_hotkey_capture(self, var):
         if self._capture_target is not None:

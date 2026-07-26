@@ -94,6 +94,9 @@ def set_startup(enable: bool):
                 
     except Exception as e:
         logger.error(f"Failed to change startup settings: {e}")
+    finally:
+        # Every caller (tray toggle, settings save) must see fresh state
+        invalidate_startup_cache()
 
 def _cleanup_old_registry_startup():
     """Remove any old registry-based startup entry."""
@@ -110,10 +113,28 @@ def _cleanup_old_registry_startup():
     except Exception:
         pass
 
+# Cache for is_startup_enabled: pystray re-evaluates menu checkmarks on every
+# open, and each query spawns a schtasks subprocess. Invalidated by set_startup.
+_startup_cache = {"ts": 0.0, "val": False}
+
+
+def invalidate_startup_cache():
+    _startup_cache["ts"] = 0.0
+
+
+def cached_is_startup_enabled() -> bool:
+    import time as _t
+    now = _t.time()
+    if now - _startup_cache["ts"] > 10.0:
+        _startup_cache["val"] = is_startup_enabled()
+        _startup_cache["ts"] = now
+    return _startup_cache["val"]
+
+
 def is_startup_enabled() -> bool:
     """Check if the startup task exists in Task Scheduler."""
     import subprocess
-    
+
     task_name = "OLED Customizer"
     try:
         result = subprocess.run(
