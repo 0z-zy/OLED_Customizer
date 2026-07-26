@@ -1,15 +1,11 @@
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlencode, urlparse, parse_qs
 import urllib3
 from base64 import b64encode
 from time import time
 from json import loads, dumps
 
-import ssl
-import ctypes
 import webbrowser
 import logging
-import sys
 import os
 import socket
 
@@ -280,13 +276,19 @@ class SpotifyAPI:
             
             item = data["item"]
             artists = ", ".join([a["name"] for a in item.get("artists", [])])
-            
+
+            # Spotify orders album images large -> small; the smallest (64px)
+            # is plenty for an 18x18 OLED thumbnail
+            images = (item.get("album") or {}).get("images") or []
+            artwork = images[-1].get("url", "") if images else ""
+
             return {
                 "title": item.get("name", "Unknown"),
                 "artist": artists,
                 "duration": item.get("duration_ms", 0),
                 "progress": data.get("progress_ms", 0),
-                "paused": not data.get("is_playing", False)
+                "paused": not data.get("is_playing", False),
+                "artwork": artwork
             }
         except Exception as e:
             logger.error(f"Failed to fetch song: {e}")

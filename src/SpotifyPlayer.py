@@ -1,3 +1,5 @@
+import threading
+
 from PIL import Image, ImageDraw, ImageFont
 from src.image_utils import fetch_content_path, draw_spotify, draw_youtube, draw_generic_media
 from src.ScrollableText import ScrollableText
@@ -51,12 +53,75 @@ class SpotifyPlayer:
         self.previous_image = None
         self.source = "spotify"
 
+        # Album art (opt-in): 18x18 dithered thumbnail drawn instead of the
+        # source icon. Fetched on a background thread, never in the render path.
+        self._art_enabled = bool(preferences.get_preference("show_album_art"))
+        self._art_url = None
+        self._art_image = None
+        self._art_seq = 0
+        self._art_http = None
+
+    def set_art_enabled(self, enabled):
+        enabled = bool(enabled)
+        if enabled == self._art_enabled:
+            return
+        self._art_enabled = enabled
+        if not enabled:
+            self._art_image = None
+        elif self._art_url:
+            self._start_art_fetch(self._art_url)
+        self.changed = True
+
+    def set_artwork(self, url):
+        url = (url or "").strip()
+        if not url.lower().startswith(("http://", "https://")):
+            url = ""
+        if url == self._art_url:
+            return
+        self._art_url = url
+        self._art_image = None
+        self.changed = True
+        if url and self._art_enabled:
+            self._start_art_fetch(url)
+
+    def _start_art_fetch(self, url):
+        self._art_seq += 1
+        threading.Thread(
+            target=self._fetch_art, args=(url, self._art_seq),
+            daemon=True, name="AlbumArt",
+        ).start()
+
+    def _fetch_art(self, url, seq):
+        try:
+            from io import BytesIO
+            import urllib3
+            if self._art_http is None:
+                self._art_http = urllib3.PoolManager(
+                    timeout=urllib3.Timeout(connect=2.0, read=3.0), retries=1
+                )
+            resp = self._art_http.request("GET", url)
+            if resp.status != 200:
+                return
+            img = Image.open(BytesIO(resp.data))
+            img = img.convert("L").resize((18, 18)).convert("1")  # FS dither
+            # Only apply if no newer fetch superseded us
+            if seq == self._art_seq and self._art_url == url:
+                self._art_image = img
+                self.changed = True
+        except Exception:
+            pass  # keep the source icon on any failure
+
     def set_paused(self, paused=True):
         self.paused = paused
 
     def update_song(self, title, artist, song_position=0, song_duration=0, paused=False, source="spotify"):
         self.title.set_text(title)
         self.artist.set_text(artist)
+
+        # New song: drop stale art immediately (the caller sets the new URL,
+        # if any, right after update_song)
+        self._art_url = None
+        self._art_image = None
 
         self.paused = paused
         self.song_position = song_position
@@ -201,7 +266,10 @@ class SpotifyPlayer:
         return image
 
     def _draw_icon(self, image, pos):
-        """Helper to draw source icon."""
+        """Helper to draw source icon (album art replaces it when available)."""
+        if self._art_enabled and self._art_image is not None:
+            image.paste(self._art_image, pos)
+            return
         if self.source == "youtube":
             draw_youtube(image, pos)
         elif self.source == "spotify":

@@ -693,6 +693,8 @@ class DisplayManager:
             
         if hasattr(self.player, "set_style"):
             self.player.set_style(self.user_preferences.get_preference("player_style"))
+        if hasattr(self.player, "set_art_enabled"):
+            self.player.set_art_enabled(self.user_preferences.get_preference("show_album_art"))
 
         if hasattr(self, "hardware_monitor"):
             self.hardware_monitor.update_preferences(self.user_preferences)
@@ -835,7 +837,8 @@ class DisplayManager:
                     "progress": prog,
                     "duration": dur,
                     "paused": not is_playing,
-                    "source": "youtube"
+                    "source": "youtube",
+                    "artwork": ext_data.get("artwork") or ""
                 }
 
             elif ext_active:
@@ -848,7 +851,8 @@ class DisplayManager:
                     "progress": int((ext_data.get("progress") or 0) * 1000),
                     "duration": int((ext_data.get("duration") or 0) * 1000),
                     "paused": not is_playing,
-                    "source": "youtube"
+                    "source": "youtube",
+                    "artwork": ext_data.get("artwork") or ""
                 }
 
             elif smtc_active:
@@ -1031,6 +1035,7 @@ class DisplayManager:
                 "progress": int(song_data.get("progress") or 0),
                 "duration": max(int(song_data.get("duration") or 1), 1),
                 "paused": self._spotify_paused,
+                "artwork": song_data.get("artwork") or "",
             }
             self._apply_to_player(self.player, payload, now_ms, source="spotify")
         except Exception:
@@ -1097,7 +1102,17 @@ class DisplayManager:
 
             if changed:
                 player.update_song(title, artist, progress, duration, paused, source)
+                # Set after update_song (which clears stale art). SMTC payloads
+                # carry no "artwork" key, so they never clobber a known art URL
+                # for the same song.
+                if "artwork" in data and hasattr(player, "set_artwork"):
+                    player.set_artwork(data.get("artwork"))
             else:
+                # Same song: adopt artwork if none is known yet (e.g. SMTC saw
+                # the song first, then the extension/Spotify sent the art URL)
+                if data.get("artwork") and hasattr(player, "set_artwork") and not player._art_url:
+                    player.set_artwork(data.get("artwork"))
+
                 # Same song: update duration if a better value arrived
                 # (e.g. SMTC set it to 1 initially, then Spotify API sent the real value)
                 if duration > 1 and duration != player.song_duration:
