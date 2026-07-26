@@ -67,6 +67,7 @@ class HIDListener(threading.Thread):
         self._last_write_ts = 0.0   # time of last host-originated write
         self._suppress_until = 0.0  # silence initial chatter
         self._write_reopen = False  # read handle was parked by our own write
+        self._handle_opened_ts = 0.0
         self._latched_profile_index = None  # Sticky index of working HID profile
         self._lock = threading.Lock()
         self._handle = None
@@ -463,6 +464,7 @@ class HIDListener(threading.Thread):
                     )
 
                     if self._handle != INVALID_HANDLE_VALUE:
+                        self._handle_opened_ts = time()
                         if self._write_reopen:
                             # Reopen caused by our own write — NOT a fresh
                             # connection. A 2s blackout here silently swallows
@@ -553,7 +555,19 @@ class HIDListener(threading.Thread):
                         # so DisplayManager doesn't see it as an 'event'.
                         if self._last_state is None:
                             self._last_state = is_muted
-                            logger.info("Cloud III HID: Established baseline hardware state muted=%s", is_muted)
+                            # The headset only reports on CHANGE, so if the very
+                            # first report lands well after we connected it is a
+                            # deliberate button press, not connection chatter.
+                            # Swallowing it entirely is why the first press after
+                            # startup appeared to do nothing.
+                            if (now - self._handle_opened_ts) > 3.0:
+                                self._last_hw_ts = now
+                                logger.info(
+                                    "Cloud III HID: First report is a real button press "
+                                    "(muted=%s) — baseline set AND applied", is_muted)
+                            else:
+                                logger.info(
+                                    "Cloud III HID: Established baseline hardware state muted=%s", is_muted)
                             continue
 
                         if is_muted != self._last_state:

@@ -1445,8 +1445,16 @@ class DisplayManager:
                             # hotkey request means Discord itself refused the
                             # SET (e.g. self-mute outside a voice channel),
                             # not that we are fighting ourselves.
+                            # Only a genuine refusal if OUR request is recent AND
+                            # no hardware button press happened since it — a
+                            # headset press also changes Discord, and
+                            # misreading that as a refusal armed a bogus
+                            # override and skipped the real sync (which is what
+                            # left the headset and Discord pointing different
+                            # ways).
                             if (self._last_hotkey_req is not None
                                     and (now - self._last_hotkey_req_ts) < 3.0
+                                    and new_hw_event_ts <= self._last_hotkey_req_ts
                                     and new_discord_mute != self._last_hotkey_req):
                                 requested = self._last_hotkey_req
                                 logger.warning(
@@ -1495,6 +1503,10 @@ class DisplayManager:
                     ):
                         if now > self._sync_lockout_until:
                             logger.info(f"[HARDWARE-SYNC] Hardware button pressed: {self._last_hw_state} -> {new_hw_mute}")
+                            # A physical press is fresh intent and supersedes
+                            # any pending hotkey request/override.
+                            self._last_hotkey_req = None
+                            self.volume_overlay._mic_override = None
                             self._last_hw_state = new_hw_mute
                             self._last_discord_state = new_hw_mute
                             self._last_hw_event_ts = new_hw_event_ts
