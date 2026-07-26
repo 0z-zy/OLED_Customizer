@@ -1505,10 +1505,16 @@ class DisplayManager:
                             self.volume_overlay.set_discord_mute(new_hw_mute, False, True)
                             self._discord_ipc.set_mute(new_hw_mute)
                         else:
-                            # Hardware event during a sync we initiated: consume
-                            # it so it can't bounce back and override the change.
-                            self._last_hw_state = new_hw_mute
-                            self._last_hw_event_ts = new_hw_event_ts
+                            # A real button press landed inside the lockout.
+                            # Deliberately do NOT consume it: leaving the
+                            # trackers untouched means it is re-evaluated and
+                            # applied the moment the lockout expires, instead
+                            # of being silently dropped (16 presses produced
+                            # only 3 syncs before this). Echoes of our own
+                            # writes are already filtered in HIDListener by the
+                            # 400ms _last_write_ts debounce, so nothing bounces.
+                            logger.debug(
+                                "[HARDWARE-SYNC] press during lockout, deferring: %s", new_hw_mute)
 
                     else:
                         # 3. Steady State

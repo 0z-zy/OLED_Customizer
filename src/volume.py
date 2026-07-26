@@ -243,7 +243,13 @@ class VolumeOverlay:
             if self._mic_override is not None:
                 target = not self._mic_override
             else:
-                target = not bool(self._discord_muted or self._discord_deafened)
+                # Toggle from the MUTE flag alone. Using (mute or deafened)
+                # here meant that while deafened the target was permanently
+                # False, so every press asked Discord to unmute — and since
+                # set_mute never clears `deaf` (which force-mutes you), the
+                # press appeared to do nothing. Deafened still counts as muted
+                # for DISPLAY purposes; it must not drive the toggle.
+                target = not bool(self._discord_muted)
             try:
                 sent = self._discord_toggle_cb(target)
             except Exception as e:
