@@ -13,10 +13,12 @@ hw_monitor_dlls = []
 hw_monitor_pkg_datas = []
 
 # Paths to search for the HardwareMonitor package (miniconda first - that's where it's installed)
+# NOTE: only Python313 paths — the build runs on conda Python 3.13, and
+# pulling packages from a Python 3.14 site-packages produces cp314 binaries
+# the bundled 3.13 interpreter cannot load.
 hw_search_paths = [
     'C:\\ProgramData\\miniconda3\\Lib\\site-packages',
     os.path.expanduser('~\\AppData\\Roaming\\Python\\Python313\\site-packages'),
-    os.path.expanduser('~\\AppData\\Roaming\\Python\\Python314\\site-packages'),
     os.path.expanduser('~\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python313\\site-packages'),
 ]
 
@@ -80,6 +82,17 @@ for pkg in problem_pkgs:
     extra_binaries += b
     extra_hidden += h
 
+# Conda's _ctypes.pyd links against ffi DLLs in Library\bin which PyInstaller's
+# dependency scan can miss, yielding an exe that dies on `import ctypes`
+# ("DLL load failed while importing _ctypes"). Bundle them explicitly.
+import sys as _sys
+_conda_lib_bin = os.path.join(_sys.prefix, 'Library', 'bin')
+for _dll in ('ffi.dll', 'ffi-7.dll', 'ffi-8.dll', 'libffi-7.dll', 'libffi-8.dll'):
+    _p = os.path.join(_conda_lib_bin, _dll)
+    if os.path.exists(_p):
+        extra_binaries.append((_p, '.'))
+        print(f"Explicitly bundling {_p}")
+
 # List of assets to include
 added_files = [
     ('version.py', '.'),
@@ -122,10 +135,11 @@ user_site = site.getusersitepackages()
 if user_site and os.path.isdir(user_site):
     extra_paths.append(user_site)
 
-# Hard-coded fallbacks for common Windows paths (Python 3.13 and 3.14)
+# Hard-coded fallbacks for common Windows paths (3.13 only — must match the
+# conda interpreter's ABI; see note above)
 roaming_base = os.path.expanduser('~\\AppData\\Roaming\\Python')
 if os.path.isdir(roaming_base):
-    for ver in ['Python313', 'Python314']:
+    for ver in ['Python313']:
         p = os.path.join(roaming_base, ver, 'site-packages')
         if os.path.isdir(p) and p not in extra_paths:
             extra_paths.append(p)
@@ -134,7 +148,7 @@ if os.path.isdir(roaming_base):
 # Also check Local AppData (Miniconda / PSF versions)
 local_base = os.path.expanduser('~\\AppData\\Local\\Python')
 if os.path.isdir(local_base):
-    for ver in ['Python313', 'Python314']:
+    for ver in ['Python313']:
         p = os.path.join(local_base, ver, 'site-packages')
         if os.path.isdir(p) and p not in extra_paths:
             extra_paths.append(p)

@@ -49,6 +49,16 @@ function getYouTubeVideoId() {
 }
 
 function scrapeMediaInfo() {
+    // Only real playback pages: homepage/channel/search hover-previews are
+    // autoplaying <video>s too, and would hijack the OLED with "YouTube /
+    // YouTube Video" garbage (the extension outranks SMTC in the app).
+    if (window.location.host.includes('youtube.com')) {
+        const p = window.location.pathname;
+        if (!p.startsWith('/watch') && !p.startsWith('/shorts') && !p.startsWith('/live')) {
+            return null;
+        }
+    }
+
     const video = getActiveVideo();
     if (!video) return null;
 
@@ -128,8 +138,8 @@ function scrapeMediaInfo() {
         artwork: window.location.host.includes('youtube.com') 
             ? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` 
             : (document.querySelector('meta[property="og:image"]')?.content || ""),
-        duration: video.duration || 0,
-        progress: video.currentTime || 0,
+        duration: Number.isFinite(video.duration) ? video.duration : 0,
+        progress: Number.isFinite(video.currentTime) ? video.currentTime : 0,
         playing: !video.paused,
         isFocused: document.visibilityState === 'visible',
         source: "YouTube (Extension)",
@@ -173,10 +183,14 @@ document.addEventListener('visibilitychange', () => {
 }, true);
 
 window.addEventListener('beforeunload', () => {
-    const data = scrapeMediaInfo();
-    if (data) {
-        data.playing = false;
-        chrome.runtime.sendMessage({ action: 'sendMediaData', data: data });
+    try {
+        const data = scrapeMediaInfo();
+        if (data) {
+            data.playing = false;
+            chrome.runtime.sendMessage({ action: 'sendMediaData', data: data });
+        }
+    } catch (e) {
+        // Extension context may already be invalidated during unload
     }
 });
 

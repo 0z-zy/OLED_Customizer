@@ -4,8 +4,6 @@
     "version": "1.5.0",
     "description": "Sends accurate media timeline data to OLED Customizer.",
     "permissions": [
-        "scripting",
-        "tabs",
         "storage"
     ],
     "host_permissions": [
