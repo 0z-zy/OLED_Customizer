@@ -1335,6 +1335,9 @@ class DisplayManager:
         self._sync_lockout_until = now + 1.2
         self._last_hotkey_req = muted
         self._last_hotkey_req_ts = now
+        # A fresh press supersedes any previous override; it is re-armed below
+        # only if Discord refuses this new request.
+        self.volume_overlay._mic_override = None
 
         # The RPC loop's sync path is suppressed for this change, so perform the
         # work it would have done: gate the real Windows capture devices...
@@ -1445,12 +1448,34 @@ class DisplayManager:
                             if (self._last_hotkey_req is not None
                                     and (now - self._last_hotkey_req_ts) < 3.0
                                     and new_discord_mute != self._last_hotkey_req):
+                                requested = self._last_hotkey_req
                                 logger.warning(
-                                    "[DISCORD-SYNC] Discord reverted our hotkey request "
-                                    "(asked mute=%s, Discord reports mute=%s) — Discord refused the change",
-                                    self._last_hotkey_req, new_discord_mute,
+                                    "[DISCORD-SYNC] Discord refused our hotkey request "
+                                    "(asked mute=%s, Discord reports mute=%s) — holding the "
+                                    "Windows mic at mute=%s so the keypress still applies",
+                                    requested, new_discord_mute, requested,
                                 )
+                                # Honor the user's intent: pin the real capture
+                                # devices where they asked and show that on the
+                                # OLED. Deliberately skip set_discord_mute(),
+                                # which would re-sync the mic to Discord's
+                                # (refused) state and un-mute them again.
+                                self._last_discord_state = new_discord_mute
+                                self._last_hw_state = new_discord_mute
+                                self._last_hw_event_ts = new_hw_event_ts
+                                self._last_hotkey_req = None
+                                self.volume_overlay._mic_override = requested
+                                try:
+                                    self.volume_overlay._sync_all_capture_mics(
+                                        requested, source="Hotkey-Override")
+                                except Exception as e:
+                                    logger.debug("Override mic sync failed: %s", e)
+                                sleep(0.1)
+                                continue
                             logger.info(f"[DISCORD-SYNC] Discord state changed: {self._last_discord_state} -> {new_discord_mute}")
+                            # A genuine Discord-side change (UI click) is fresh
+                            # user intent and supersedes any refusal override.
+                            self.volume_overlay._mic_override = None
                             self._last_discord_state = new_discord_mute
                             self._last_hw_state = new_discord_mute
                             self._last_hw_event_ts = new_hw_event_ts

@@ -221,7 +221,18 @@ class DiscordIPC:
                         body = b""
                         while len(body) < length:
                             body += self._pipe.read(length - len(body))
-                        return json.loads(body.decode("utf-8"))
+                        frame = json.loads(body.decode("utf-8"))
+                        # Raw frame trace: needed to tell a lagging event from a
+                        # second, independent toggle (e.g. a Discord keybind on
+                        # the same physical key firing alongside our command).
+                        if logger.isEnabledFor(logging.DEBUG):
+                            d = frame.get("data") or {}
+                            logger.debug(
+                                "RPC-FRAME t=%.3f cmd=%s evt=%s nonce=%s mute=%s deaf=%s",
+                                time.time(), frame.get("cmd"), frame.get("evt"),
+                                str(frame.get("nonce"))[:8], d.get("mute"), d.get("deaf"),
+                            )
+                        return frame
                     return {}
             except Exception:
                 break
@@ -298,7 +309,10 @@ class DiscordIPC:
                 "nonce": str(uuid.uuid4())
             })
             # We don't wait for response here, it will be drained in get_voice_settings
-            logger.info(f"Sent SET_VOICE_SETTINGS to Discord: mute={muted}")
+            logger.info(
+                "Sent SET_VOICE_SETTINGS to Discord: mute=%s (Discord last reported mute=%s deaf=%s)",
+                muted, self._last_voice_state.get("mute"), self._last_voice_state.get("deaf"),
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to send SET_VOICE_SETTINGS: {e}")

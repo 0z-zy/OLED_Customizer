@@ -56,6 +56,11 @@ class VolumeOverlay:
         # Callback(muted: bool) -> bool, set by DisplayManager. Routes the mute
         # hotkey to Discord's SET_VOICE_SETTINGS when the IPC pipe is connected.
         self._discord_toggle_cb = None
+        # When Discord refuses a mute request, DisplayManager sets this to the
+        # state the user actually asked for. The Windows mic is held there and
+        # the OLED shows it, so a refusal can never leave you with a hot mic.
+        # None = no override, Discord/system state drives the display as usual.
+        self._mic_override = None
         
         # Initial state fetch to prevent showing overlay on startup
         self._silent_init()
@@ -232,7 +237,13 @@ class VolumeOverlay:
         (e.g. not authenticated), falls back to system mic mute.
         """
         if self._discord_connected and self._discord_toggle_cb:
-            target = not bool(self._discord_muted or self._discord_deafened)
+            # An active override is the truth about the mic, so toggle from it —
+            # otherwise a refused request would make the next press repeat the
+            # same command instead of reversing it.
+            if self._mic_override is not None:
+                target = not self._mic_override
+            else:
+                target = not bool(self._discord_muted or self._discord_deafened)
             try:
                 sent = self._discord_toggle_cb(target)
             except Exception as e:
@@ -463,7 +474,10 @@ class VolumeOverlay:
         # 2. Mic Icon — Discord state takes priority, falls back to system mic state
         mic_width = 0
         mic_mute_state = self._last_mic_mute  # System mic state (fallback)
-        if self._discord_connected and (self._discord_muted is not None or self._discord_deafened is not None):
+        if self._mic_override is not None:
+            # Discord refused our request; show what the mic is REALLY doing
+            mic_mute_state = self._mic_override
+        elif self._discord_connected and (self._discord_muted is not None or self._discord_deafened is not None):
             # Combined mute state for display: either muted OR deafened
             mic_mute_state = bool(self._discord_muted or self._discord_deafened)
         

@@ -332,14 +332,16 @@ class HardwareMonitor:
             except Exception:
                 battery = None
 
-        if self.show_fps:
-            if fps > 0:
-                val_text = f"{int(fps)}" + ("" if fps >= 100 else " FPS")
-                draw_centered(val_text, c3_x, y_text2)
-            else:
-                draw_centered("Idle", c3_x, y_text2)
+        # A live FPS reading wins (you're in a game); otherwise the slot is far
+        # more useful showing battery than "Idle"/RAM total. Without this,
+        # enabling battery while Show Game FPS was on displayed nothing.
+        if self.show_fps and fps > 0:
+            val_text = f"{int(fps)}" + ("" if fps >= 100 else " FPS")
+            draw_centered(val_text, c3_x, y_text2)
         elif battery is not None:
             draw_centered(f"B:{int(battery)}%", c3_x, y_text2)
+        elif self.show_fps:
+            draw_centered("Idle", c3_x, y_text2)
         else:
             draw_centered(f"{int(ram_total)}GB", c3_x, y_text2)
 

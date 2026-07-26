@@ -66,6 +66,7 @@ class HIDListener(threading.Thread):
         self._last_hw_ts = 0.0      # time of last physical/accepted report
         self._last_write_ts = 0.0   # time of last host-originated write
         self._suppress_until = 0.0  # silence initial chatter
+        self._write_reopen = False  # read handle was parked by our own write
         self._latched_profile_index = None  # Sticky index of working HID profile
         self._lock = threading.Lock()
         self._handle = None
@@ -305,6 +306,9 @@ class HIDListener(threading.Thread):
                 except Exception:
                     pass
                 self._handle = None
+                # Mark the upcoming reopen as ours, so the listener does not
+                # start a 2s settle blackout that swallows real button presses.
+                self._write_reopen = True
 
         # Try multiple open modes from permissive to strict.
         # If the device expects exclusive control for output reports,
@@ -459,9 +463,18 @@ class HIDListener(threading.Thread):
                     )
 
                     if self._handle != INVALID_HANDLE_VALUE:
-                        logger.info("Cloud III HID: Connected for reading")
-                        # 0. Initial Sync Settle: Ignore reports during startup/connection flurry for 2 seconds
-                        self._suppress_until = time() + 2.0
+                        if self._write_reopen:
+                            # Reopen caused by our own write — NOT a fresh
+                            # connection. A 2s blackout here silently swallows
+                            # real button presses (which is why the headset
+                            # button stopped working); the 400ms echo debounce
+                            # below already filters our own write's echo.
+                            self._write_reopen = False
+                            logger.debug("Cloud III HID: Reopened after host write (no settle blackout)")
+                        else:
+                            logger.info("Cloud III HID: Connected for reading")
+                            # Initial Sync Settle: ignore the connection flurry
+                            self._suppress_until = time() + 2.0
                         reconnect_delay = 1
                     else:
                         logger.debug("HID Discovery: Read handle open failed, err=%s", ctypes.get_last_error())
@@ -498,6 +511,10 @@ class HIDListener(threading.Thread):
 
                 if bytes_read.value > 0:
                     data = bytes(read_buf.raw[:bytes_read.value])
+                    # Trace every raw report: the battery-report format (type
+                    # 0x01) is inferred, not documented, so this is how we
+                    # confirm what the headset actually sends.
+                    logger.debug("HID RAW: %s", data[:8].hex(" "))
                     # Profile Verification: Cloud III sends mute on 0d 02 03 ...
                     if len(data) >= 6 and data[0] == 0x0D and data[1:3] == b'\x02\x03':
                         # Byte 4 is the command/identity. 
@@ -507,13 +524,22 @@ class HIDListener(threading.Thread):
                         report_val  = data[5]
 
                         # Only process as a Mute Event if:
-                        # 1) It's a known mute-status report type (0x05)
+                        # 1) It's a known mute-status report type
                         # 2) AND the value is a clean boolean (0x00 or 0x01)
                         # This ignores battery reports (like 0x01 0x30 for 48%)
-                        if report_type == 0x05 and report_val in (0x00, 0x01):
+                        #
+                        # 0x03 observed on Cloud III Wireless (VID_03F0/PID_06BE):
+                        # raw "0d 02 03 00 03 01" = muted. It matches the shape
+                        # this class already WRITES for mute (report[4]=0x03),
+                        # while the read path only accepted 0x05 — so physical
+                        # button presses were silently discarded on this device.
+                        if report_type in (0x05, 0x03) and report_val in (0x00, 0x01):
                             is_muted = (report_val == 0x01)
                         elif report_type == 0x01 and 0 < report_val <= 100:
                             # Battery status report (e.g. 0x01 0x30 = 48%)
+                            if self.battery_percent != int(report_val):
+                                logger.info("Cloud III battery report: %d%% (raw=%s)",
+                                            int(report_val), data[:6].hex(" "))
                             self.battery_percent = int(report_val)
                             continue
                         else:
