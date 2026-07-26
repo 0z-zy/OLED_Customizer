@@ -707,6 +707,8 @@ class DisplayManager:
             self.player.set_style(self.user_preferences.get_preference("player_style"))
         self.timer.show_battery = bool(
             self.user_preferences.get_preference("show_headset_battery"))
+        self.timer.show_battery_percent = bool(
+            self.user_preferences.get_preference("show_battery_percent"))
 
         if hasattr(self, "hardware_monitor"):
             self.hardware_monitor.update_preferences(self.user_preferences)

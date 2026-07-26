@@ -52,6 +52,7 @@ class Timer:
         # columns have no free slot, but every clock style leaves this corner
         # empty. DisplayManager injects the getter.
         self.show_battery = False
+        self.show_battery_percent = False   # icon only unless enabled
         self.battery_getter = None
 
     def set_style(self, style):
@@ -83,7 +84,9 @@ class Timer:
 
         # Clear the corner first: the Big Timer face is wide enough to run
         # underneath the icon, and overlapping strokes make both unreadable.
-        draw.rectangle((x0 - 2, 0, w - 1, 26), fill=off)
+        # Only reserve the taller area when the number is actually drawn.
+        draw.rectangle((x0 - 2, 0, w - 1, 26 if self.show_battery_percent else 10),
+                       fill=off)
 
         draw.rectangle((x0, top, x1, bot), outline=on)                  # body
         draw.rectangle((x1 + 1, top + 3, x1 + 2, bot - 3), fill=on)     # nub
@@ -100,8 +103,9 @@ class Timer:
             draw.rectangle((left, top + 2, left + SEG_W - 1, bot - 2), fill=on)
 
         # Level centred under the icon (icon spans x0..x1+2 including the nub)
-        draw.text(((x0 + x1 + 2) // 2, 11), str(pct), font=self.FONT_BATT,
-                  fill=on, anchor="mt")
+        if self.show_battery_percent:
+            draw.text(((x0 + x1 + 2) // 2, 11), str(pct), font=self.FONT_BATT,
+                      fill=on, anchor="mt")
 
     def get_image(self):
         battery = self._battery()
@@ -110,10 +114,10 @@ class Timer:
             # use_turkish_days matters here too: analog draws the day name
             key = (self.style, now.tm_hour, now.tm_min,
                    now.tm_sec if self.display_seconds else -1,
-                   self.use_turkish_days, battery)
+                   self.use_turkish_days, battery, self.show_battery_percent)
         else:
             t_text, d_text = self.get_current_time()
-            key = (self.style, t_text, d_text, battery)
+            key = (self.style, t_text, d_text, battery, self.show_battery_percent)
 
         if key == self._cache_key and self._cached_image is not None:
             return self._cached_image
