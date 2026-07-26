@@ -156,10 +156,18 @@ class ToggleSwitch(tk.Canvas):
 
 
 class SettingsGUI:
+    # Dropdowns that show friendly labels but must save raw values.
+    # _init_variables maps value -> label, _save_all maps label -> value.
+    DROPDOWN_MAPS = {
+        "spotify_fetch_delay": {"1s (Fast)": "1", "2s (Default)": "2", "3s": "3", "5s": "5", "10s": "10"},
+        "hw_polling_interval": {"500ms": "500", "1s (Default)": "1000", "2s": "2000", "5s": "5000"},
+    }
+
     def __init__(self, prefs, on_save=None):
         self.prefs = prefs
         self.on_save = on_save
         self.root = None
+        self.hwnd = None
         self.vars = {}
         self.rgb = list(prefs.get_preference("rgb_color") or [0, 212, 170])
         self.current_page = None
@@ -167,10 +175,6 @@ class SettingsGUI:
         self.nav_buttons = {}
 
     def show(self):
-        if self.root:
-            try: self.root.lift(); return
-            except Exception: pass
-
         self.root = tk.Tk()
         self.current_page = None
         self.root.overrideredirect(True)
@@ -188,6 +192,7 @@ class SettingsGUI:
             WS_EX_APPWINDOW = 0x00040000
             WS_EX_TOOLWINDOW = 0x00000080
             hwnd = ctypes.windll.user32.GetParent(root.winfo_id())
+            self.hwnd = hwnd or root.winfo_id()
             style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
             style = style & ~WS_EX_TOOLWINDOW
             style = style | WS_EX_APPWINDOW
@@ -203,7 +208,11 @@ class SettingsGUI:
         style.map("TCombobox", fieldbackground=[("readonly", Colors.INPUT_BG)], selectbackground=[("readonly", Colors.INPUT_BG)], selectforeground=[("readonly", Colors.INPUT_FG)])
 
         self._build_layout()
-        self.root.mainloop()
+        try:
+            self.root.mainloop()
+        finally:
+            self.root = None
+            self.hwnd = None
 
     def _build_layout(self):
         CustomTitleBar(self.root, "OLED Customizer").pack(side="top", fill="x")
@@ -268,6 +277,13 @@ class SettingsGUI:
         self.root.update()
         self._switch_page("General")
 
+    def _display_for(self, key, value):
+        """Map a stored raw value to its dropdown display label."""
+        for disp, val in self.DROPDOWN_MAPS.get(key, {}).items():
+            if val == str(value):
+                return disp
+        return str(value)
+
     def _init_variables(self):
         self.vars["clock_style"] = tk.StringVar(value=self.prefs.get_preference("clock_style") or "Standard")
         self.vars["display_seconds"] = tk.BooleanVar(value=bool(self.prefs.get_preference("display_seconds")))
@@ -292,10 +308,10 @@ class SettingsGUI:
         self.vars["scrollbar_padding"] = tk.StringVar(value=str(self.prefs.get_preference("scrollbar_padding") or "2"))
         self.vars["text_padding_left"] = tk.StringVar(value=str(self.prefs.get_preference("text_padding_left") or "30"))
         self.vars["auto_launch_gg"] = tk.BooleanVar(value=bool(self.prefs.get_preference("auto_launch_gg")))
-        self.vars["hw_polling_interval"] = tk.StringVar(value=str(self.prefs.get_preference("hw_polling_interval") or "1000"))
+        self.vars["hw_polling_interval"] = tk.StringVar(value=self._display_for("hw_polling_interval", self.prefs.get_preference("hw_polling_interval") or 1000))
         self.vars["show_game_fps"] = tk.BooleanVar(value=bool(self.prefs.get_preference("show_game_fps")))
         self.vars["selected_gpu"] = tk.StringVar(value=self.prefs.get_preference("selected_gpu") or "Auto")
-        self.vars["spotify_fetch_delay"] = tk.StringVar(value=str(self.prefs.get_preference("spotify_fetch_delay") or "2"))
+        self.vars["spotify_fetch_delay"] = tk.StringVar(value=self._display_for("spotify_fetch_delay", self.prefs.get_preference("spotify_fetch_delay") or 2))
         self.vars["discord_client_id"] = tk.StringVar(value=self.prefs.get_preference("discord_client_id") or "")
         self.vars["discord_client_secret"] = tk.StringVar(value=self.prefs.get_preference("discord_client_secret") or "")
         self.vars["headset_hid_sync_enabled"] = tk.BooleanVar(value=bool(self.prefs.get_preference("headset_hid_sync_enabled")))
@@ -333,7 +349,7 @@ class SettingsGUI:
             available_gpus += _lhm_worker.get_available_gpus()
         except: pass
         self._dropdown_row(p_disp, "Selected GPU", self.vars["selected_gpu"], available_gpus)
-        self._dropdown_row(p_disp, "HW Polling Rate", self.vars["hw_polling_interval"], ["500ms", "1s (Default)", "2s", "5s"], display_to_val={"500ms": "500", "1s (Default)": "1000", "2s": "2000", "5s": "5000"})
+        self._dropdown_row(p_disp, "HW Polling Rate", self.vars["hw_polling_interval"], ["500ms", "1s (Default)", "2s", "5s"])
         self.pages["Display"] = p_disp
 
         # Spotify
@@ -344,7 +360,7 @@ class SettingsGUI:
         self._entry_row(p_spotify, "Spotify Client Secret", self.vars["spotify_client_secret"], width=25, show="*")
         self._entry_row(p_spotify, "Redirect URI", self.vars["spotify_redirect_uri"], width=25)
         self._entry_row(p_spotify, "Connection Port", self.vars["local_port"])
-        self._dropdown_row(p_spotify, "Polling Rate", self.vars["spotify_fetch_delay"], ["1s (Fast)", "2s (Default)", "3s", "5s", "10s"], display_to_val={"1s (Fast)": "1", "2s (Default)": "2", "3s": "3", "5s": "5", "10s": "10"})
+        self._dropdown_row(p_spotify, "Polling Rate", self.vars["spotify_fetch_delay"], ["1s (Fast)", "2s (Default)", "3s", "5s", "10s"])
         self.pages["Spotify"] = p_spotify
 
         # Hotkeys
@@ -464,7 +480,7 @@ class SettingsGUI:
     def _toggle_row(self, p, l, v, command=None):
         f = self._row_frame(p); tk.Label(f, text=l, font=FONT_BODY, fg=Colors.TEXT_MAIN, bg=Colors.CARD_BG).pack(side="left", padx=15)
         ToggleSwitch(f, v, command=command).pack(side="right", padx=15)
-    def _dropdown_row(self, p, l, v, opts, display_to_val=None):
+    def _dropdown_row(self, p, l, v, opts):
         f = self._row_frame(p); tk.Label(f, text=l, font=FONT_BODY, fg=Colors.TEXT_MAIN, bg=Colors.CARD_BG).pack(side="left", padx=15)
         cb = ttk.Combobox(f, textvariable=v, values=opts, state="readonly", width=15); cb.pack(side="right", padx=15)
     def _entry_row(self, p, l, v, width=10, show=None):
@@ -494,7 +510,11 @@ class SettingsGUI:
             # Gather all vars with proper type conversion
             for k, v in self.vars.items():
                 val = v.get()
-                
+
+                # Map dropdown display labels back to raw values ("1s (Fast)" -> "1")
+                if k in self.DROPDOWN_MAPS:
+                    val = self.DROPDOWN_MAPS[k].get(val, val)
+
                 # Integer fields
                 if k in ["scrollbar_padding", "text_padding_left", "local_port", "discord_local_port", "spotify_fetch_delay", "hw_polling_interval"]:
                     try: val = int(val)
@@ -524,5 +544,32 @@ class SettingsGUI:
         from src.debug_utils import toggle_debug_logging
         toggle_debug_logging(self.vars["debug_enabled"].get())
 
+# Only one settings window may exist: tkinter is not thread-safe, and each
+# tray click spawns a fresh thread. If a window is already open we focus it
+# via Win32 (safe from any thread) instead of touching Tk cross-thread.
+_open_gui_lock = threading.Lock()
+_open_gui = None
+
+
 def open_settings(prefs, callback=None):
-    SettingsGUI(prefs, callback).show()
+    global _open_gui
+    with _open_gui_lock:
+        if _open_gui is not None:
+            hwnd = _open_gui.hwnd
+            if hwnd:
+                try:
+                    ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+                    ctypes.windll.user32.SetForegroundWindow(hwnd)
+                except Exception:
+                    pass
+            return
+        gui = SettingsGUI(prefs, callback)
+        _open_gui = gui
+    try:
+        gui.show()
+    except Exception:
+        logger.exception("Settings window crashed")
+    finally:
+        with _open_gui_lock:
+            if _open_gui is gui:
+                _open_gui = None
