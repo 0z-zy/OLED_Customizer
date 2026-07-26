@@ -101,7 +101,7 @@ def _cleanup_old_backups(max_backups: int):
     """Remove old backups beyond the limit."""
     backups = list_backups()
     while len(backups) > max_backups:
-        _, old_path, _ = backups.pop()  # Remove oldest
+        _, old_path, _, _ = backups.pop()  # Remove oldest (name, path, count, mtime)
         try:
             shutil.rmtree(old_path)
             logger.info(f"Removed old backup: {old_path}")
