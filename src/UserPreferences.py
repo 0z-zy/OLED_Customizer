@@ -50,8 +50,7 @@ class UserPreferences:
         "discord_access_token": "",
         "headset_hid_sync_enabled": False,
         "discord_local_port": 8888,
-        "show_headset_battery": False,
-        "show_album_art": False
+        "show_headset_battery": False
     }
 
     def __init__(self):

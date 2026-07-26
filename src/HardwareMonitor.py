@@ -225,14 +225,8 @@ class HardwareMonitor:
         if self.show_fps:
             self.fps_monitor.start()
 
-        # Headset battery (opt-in). DisplayManager injects a getter that reads
-        # the HID listener's last battery report.
-        self.show_battery = bool(preferences.get_preference("show_headset_battery"))
-        self.battery_getter = None
-
     def update_preferences(self, preferences):
         self.show_fps = bool(preferences.get_preference("show_game_fps"))
-        self.show_battery = bool(preferences.get_preference("show_headset_battery"))
         if self.show_fps:
             self.fps_monitor.start()
         else:
@@ -321,27 +315,15 @@ class HardwareMonitor:
         draw_centered(f"{int(gpu_temp)}°" if gpu_temp else "--", c2_x, y_text1)
         draw_centered(f"{int(gpu_load) if gpu_load else 0}%", c2_x, y_text2)
 
-        # RAM / FPS / Battery (third column bottom line: FPS > battery > total RAM)
+        # RAM / FPS (headset battery lives on the clock — no free slot here)
         paste_centered(self.ram_icon, c3_x, y_icon)
         draw_centered(f"{ram_used:.1f}G", c3_x, y_text1)
-
-        battery = None
-        if self.show_battery and self.battery_getter:
-            try:
-                battery = self.battery_getter()
-            except Exception:
-                battery = None
-
-        # A live FPS reading wins (you're in a game); otherwise the slot is far
-        # more useful showing battery than "Idle"/RAM total. Without this,
-        # enabling battery while Show Game FPS was on displayed nothing.
-        if self.show_fps and fps > 0:
-            val_text = f"{int(fps)}" + ("" if fps >= 100 else " FPS")
-            draw_centered(val_text, c3_x, y_text2)
-        elif battery is not None:
-            draw_centered(f"B:{int(battery)}%", c3_x, y_text2)
-        elif self.show_fps:
-            draw_centered("Idle", c3_x, y_text2)
+        if self.show_fps:
+            if fps > 0:
+                val_text = f"{int(fps)}" + ("" if fps >= 100 else " FPS")
+                draw_centered(val_text, c3_x, y_text2)
+            else:
+                draw_centered("Idle", c3_x, y_text2)
         else:
             draw_centered(f"{int(ram_total)}GB", c3_x, y_text2)
 

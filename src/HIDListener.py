@@ -266,6 +266,59 @@ class HIDListener(threading.Thread):
         self.thread = threading.Thread(target=self._listen_loop, daemon=True)
         self.thread.start()
 
+        threading.Thread(target=self._battery_poll_loop, daemon=True,
+                         name="HID-Battery").start()
+
+    def query_battery(self):
+        """Ask the headset for its battery level.
+
+        Protocol confirmed by capture: sending '0c 02 03 01 00 06' makes the
+        device answer '0c 02 03 01 00 06 <pct> <flag>' on the normal input
+        stream, which _listen_loop parses. Unlike _do_hardware_mute this does
+        NOT park the read handle - the device accepts the write on a separate
+        handle while a reader is attached, so the mute button keeps working.
+        """
+        if not self.device_path:
+            return False
+
+        handle = CreateFileW(self.device_path, GENERIC_READ | GENERIC_WRITE,
+                             SHARE_READ_WRITE, None, OPEN_EXISTING, 0, None)
+        if handle == INVALID_HANDLE_VALUE:
+            handle = CreateFileW(self.device_path, GENERIC_WRITE,
+                                 SHARE_READ_WRITE, None, OPEN_EXISTING, 0, None)
+        if handle == INVALID_HANDLE_VALUE:
+            logger.debug("HID Battery: cannot open write handle, err=%s", ctypes.get_last_error())
+            return False
+
+        try:
+            report = bytearray(64)
+            report[0:6] = bytes((0x0C, 0x02, 0x03, 0x01, 0x00, 0x06))
+            written = wintypes.DWORD(0)
+            if WriteFile(handle, bytes(report), 64, ctypes.byref(written), None):
+                return True
+            out_buf = (ctypes.c_ubyte * 64)()
+            for i in range(6):
+                out_buf[i] = report[i]
+            return bool(HidD_SetOutputReport(handle, ctypes.byref(out_buf), 64))
+        except Exception as e:
+            logger.debug("HID Battery query failed: %s", e)
+            return False
+        finally:
+            CloseHandle(handle)
+
+    def _battery_poll_loop(self):
+        """Battery is answer-on-request only; nothing is broadcast unprompted."""
+        sleep(5)  # let the read handle settle first
+        while self._running:
+            try:
+                self.query_battery()
+            except Exception as e:
+                logger.debug("Battery poll error: %s", e)
+            for _ in range(60):          # ~60s, but exit promptly on stop()
+                if not self._running:
+                    return
+                sleep(1)
+
     def stop(self):
         self._running = False
         with self._lock:
@@ -517,6 +570,19 @@ class HIDListener(threading.Thread):
                     # 0x01) is inferred, not documented, so this is how we
                     # confirm what the headset actually sends.
                     logger.debug("HID RAW: %s", data[:8].hex(" "))
+                    # Battery reply, confirmed by HID capture against NGENUITY:
+                    #   query  0c 02 03 01 00 06
+                    #   reply  0c 02 03 01 00 06 <pct> <flag>
+                    # (0x33 = 51 matched the headset's real 51% reading)
+                    if len(data) >= 7 and data[0] == 0x0C and data[1:6] == b'\x02\x03\x01\x00\x06':
+                        pct = data[6]
+                        if 0 <= pct <= 100:
+                            if self.battery_percent != pct:
+                                logger.info("Cloud III battery: %d%% (raw=%s)",
+                                            pct, data[:8].hex(" "))
+                            self.battery_percent = pct
+                        continue
+
                     # Profile Verification: Cloud III sends mute on 0d 02 03 ...
                     if len(data) >= 6 and data[0] == 0x0D and data[1:3] == b'\x02\x03':
                         # Byte 4 is the command/identity. 
@@ -537,13 +603,6 @@ class HIDListener(threading.Thread):
                         # button presses were silently discarded on this device.
                         if report_type in (0x05, 0x03) and report_val in (0x00, 0x01):
                             is_muted = (report_val == 0x01)
-                        elif report_type == 0x01 and 0 < report_val <= 100:
-                            # Battery status report (e.g. 0x01 0x30 = 48%)
-                            if self.battery_percent != int(report_val):
-                                logger.info("Cloud III battery report: %d%% (raw=%s)",
-                                            int(report_val), data[:6].hex(" "))
-                            self.battery_percent = int(report_val)
-                            continue
                         else:
                             # Skip this report - boom-plug or other noise
                             continue

@@ -43,19 +43,35 @@ class Timer:
         self._cache_key = None
         self._cached_image = None
 
+        # Headset battery in the top-left corner. The HW monitor's three
+        # columns have no free slot, but every clock style leaves this corner
+        # empty. DisplayManager injects the getter.
+        self.show_battery = False
+        self.battery_getter = None
+
     def set_style(self, style):
         self.style = style
 
+    def _battery(self):
+        if not self.show_battery or not self.battery_getter:
+            return None
+        try:
+            val = self.battery_getter()
+        except Exception:
+            return None
+        return val if isinstance(val, int) and 0 <= val <= 100 else None
+
     def get_image(self):
+        battery = self._battery()
         now = localtime()
         if self.style == self.Style.ANALOG:
             # use_turkish_days matters here too: analog draws the day name
             key = (self.style, now.tm_hour, now.tm_min,
                    now.tm_sec if self.display_seconds else -1,
-                   self.use_turkish_days)
+                   self.use_turkish_days, battery)
         else:
             t_text, d_text = self.get_current_time()
-            key = (self.style, t_text, d_text)
+            key = (self.style, t_text, d_text, battery)
 
         if key == self._cache_key and self._cached_image is not None:
             return self._cached_image
@@ -165,6 +181,12 @@ class Timer:
                     fill=self.config.primary,
                     anchor="mm"
                 )
+
+        if battery is not None:
+            # Top-left corner: free in every clock style (Standard/Big/Date
+            # centre their text, Analog's face is centred at x=64).
+            draw.text((1, 0), f"{battery}%", font=self.FONT_DIGI_SMALL,
+                      fill=self.config.primary, anchor="lt")
 
         self._cache_key = key
         self._cached_image = image

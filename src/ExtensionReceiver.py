@@ -34,7 +34,6 @@ class ExtensionData:
         return {
             "title": str(new_data.get("title") or ""),
             "artist": str(new_data.get("artist") or ""),
-            "artwork": str(new_data.get("artwork") or ""),
             "progress": _num(new_data.get("progress")),
             "duration": _num(new_data.get("duration")),
             "playing": new_data.get("playing") is True,
