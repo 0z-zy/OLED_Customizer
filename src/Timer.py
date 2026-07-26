@@ -63,38 +63,40 @@ class Timer:
         return val if isinstance(val, int) and 0 <= val <= 100 else None
 
     def _draw_battery(self, draw, pct):
-        """Vertical battery icon in the top-right corner, level printed under it.
+        """Phone-style horizontal battery, top-right, level printed under it.
 
-            ▁▁        <- terminal nub
-           |██|       <- body, filled from the bottom
-           |██|
-            51        <- percentage
+            ┌────────┐▌   <- body + terminal nub on the right
+            │▓▓▓░░░░░│▌
+            └────────┘▌
+                   51     <- percentage
         """
         w = self.config.width
         on, off = self.config.primary, self.config.secondary
 
+        x1 = w - 4                   # body right edge (nub sits outside it)
+        x0 = x1 - 16                 # 17px wide
+        top, bot = 0, 8              # 9px tall
+
         # Clear the corner first: the Big Timer face is wide enough to run
         # underneath the icon, and overlapping strokes make both unreadable.
-        draw.rectangle((w - 21, 0, w - 1, 24), fill=off)
+        draw.rectangle((x0 - 2, 0, w - 1, 26), fill=off)
 
-        x0, x1 = w - 9, w - 3        # 7px wide body
-        top, bot = 2, 14             # 13px tall body
-
-        draw.rectangle((x0 + 2, 0, x1 - 2, 1), fill=on)        # nub
-        draw.rectangle((x0, top, x1, bot), outline=on)          # body
+        draw.rectangle((x0, top, x1, bot), outline=on)                  # body
+        draw.rectangle((x1 + 1, top + 3, x1 + 2, bot - 3), fill=on)     # nub
 
         # 4 discrete segments (25% each) rather than one continuous fill —
         # a solid block reads as a single bar and you can't judge the level
-        # at a glance. 4 x 2px bars + 3 x 1px gaps == the 11px interior.
-        SEGMENTS, SEG_H, GAP = 4, 2, 1
-        inner_bot = bot - 1
+        # at a glance. 4 x 3px bars + 3 x 1px gaps == the 15px interior.
+        SEGMENTS, SEG_W, GAP = 4, 3, 1
         lit = max(0, min(SEGMENTS, -(-max(0, min(100, pct)) // (100 // SEGMENTS))))
         for i in range(lit):
-            y_bot = inner_bot - i * (SEG_H + GAP)
-            draw.rectangle((x0 + 1, y_bot - SEG_H + 1, x1 - 1, y_bot), fill=on)
+            left = x0 + 1 + i * (SEG_W + GAP)
+            draw.rectangle((left, top + 2, left + SEG_W - 1, bot - 2), fill=on)
 
-        # Level underneath, right-aligned with the icon
-        draw.text((x1 + 1, 16), str(pct), font=self.FONT_BATT, fill=on, anchor="rt")
+        # Level underneath. Uses the larger 14px face — at 10px the DS-DIGI
+        # digits (notably '5') lose strokes and read as distorted.
+        draw.text((x1 + 2, 10), str(pct), font=self.FONT_DIGI_SMALL,
+                  fill=on, anchor="rt")
 
     def get_image(self):
         battery = self._battery()

@@ -63,6 +63,7 @@ class HIDListener(threading.Thread):
         self._running = False
         self._last_state = None
         self.battery_percent = None  # last battery % reported by the headset
+        self._battery_ts = 0.0       # when that reply arrived
         self._last_hw_ts = 0.0      # time of last physical/accepted report
         self._last_write_ts = 0.0   # time of last host-originated write
         self._suppress_until = 0.0  # silence initial chatter
@@ -268,6 +269,25 @@ class HIDListener(threading.Thread):
 
         threading.Thread(target=self._battery_poll_loop, daemon=True,
                          name="HID-Battery").start()
+
+    # A powered-off / out-of-range headset simply stops answering battery
+    # queries (the wireless dongle stays enumerated), so staleness is the
+    # only reliable "is it there" signal.
+    BATTERY_STALE_AFTER = 150.0      # ~2.5 missed 60s polls
+
+    def current_battery(self):
+        """Battery %, or None when the headset hasn't answered recently, so
+        the UI can hide the indicator entirely instead of showing a stale
+        number for a headset that is switched off."""
+        if self.battery_percent is None or not self.device_path:
+            return None
+        if (time() - self._battery_ts) > self.BATTERY_STALE_AFTER:
+            if self.battery_percent is not None:
+                logger.info("Cloud III battery: no reply for %.0fs — headset "
+                            "appears off, hiding indicator", self.BATTERY_STALE_AFTER)
+                self.battery_percent = None
+            return None
+        return self.battery_percent
 
     def query_battery(self):
         """Ask the headset for its battery level.
@@ -581,6 +601,7 @@ class HIDListener(threading.Thread):
                                 logger.info("Cloud III battery: %d%% (raw=%s)",
                                             pct, data[:8].hex(" "))
                             self.battery_percent = pct
+                            self._battery_ts = time()
                         continue
 
                     # Profile Verification: Cloud III sends mute on 0d 02 03 ...

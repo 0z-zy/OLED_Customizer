@@ -132,7 +132,7 @@ class DisplayManager:
         )
         # Headset battery, shown top-left on the clock (opt-in; needs HID sync)
         self.timer.battery_getter = lambda: (
-            self._hid_listener.battery_percent if self._hid_listener else None
+            self._hid_listener.current_battery() if self._hid_listener else None
         )
         Thread(target=self._discord_rpc_loop, daemon=True, name="Discord-RPC").start()
 
