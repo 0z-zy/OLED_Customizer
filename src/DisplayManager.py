@@ -104,6 +104,10 @@ class DisplayManager:
         self._smtc_lock = __import__('threading').Lock()
         Thread(target=self._poll_smtc_loop, daemon=True).start()
 
+        # SMTC Broadcast HTTP server
+        self._smtc_broadcast_server = None
+        self._check_smtc_broadcast_server()
+
         # Discord RPC — polls Discord's local IPC for mic mute/deaf state
         discord_cid = self.user_preferences.get_preference("discord_client_id") or None
         self._discord_ipc = DiscordIPC(
@@ -727,6 +731,7 @@ class DisplayManager:
         )
 
         self._spotify_poll_ms = max(250, int(self.fetch_delay * 1000))
+        self._check_smtc_broadcast_server()
         
         # Reload Spotify credentials if they changed (only if Spotify is enabled)
         if hasattr(self, "spotify_api") and self.spotify_api:
@@ -741,6 +746,30 @@ class DisplayManager:
             # OR we could silently try to fetch if prompt_user=False? No, let's keep it clean.
 
     # _parse_key removed — replaced by _key_str_to_vk and _reload_hotkey_vks above
+
+    def _check_smtc_broadcast_server(self):
+        enabled = bool(self.user_preferences.get_preference("smtc_broadcast_enabled"))
+        port = int(self.user_preferences.get_preference("smtc_broadcast_port") or 1231)
+
+        if enabled:
+            # If the chosen port is already used by ExtensionReceiver, it already serves /media
+            ext_port = getattr(self.extension_receiver, "port", None) if hasattr(self, "extension_receiver") else None
+            if ext_port == port:
+                if self._smtc_broadcast_server:
+                    self._smtc_broadcast_server.stop()
+                    self._smtc_broadcast_server = None
+                return
+
+            if self._smtc_broadcast_server is None or self._smtc_broadcast_server.port != port:
+                if self._smtc_broadcast_server:
+                    self._smtc_broadcast_server.stop()
+                from src.SMTCBroadcast import SMTCBroadcastServer
+                self._smtc_broadcast_server = SMTCBroadcastServer(port=port)
+                self._smtc_broadcast_server.start()
+        else:
+            if self._smtc_broadcast_server:
+                self._smtc_broadcast_server.stop()
+                self._smtc_broadcast_server = None
 
     def init(self):
         # Startup: Only attempt Spotify auth if enabled
@@ -1209,6 +1238,14 @@ class DisplayManager:
             except Exception:
                 pass
 
+        # Stop SMTC Broadcast HTTP server
+        if hasattr(self, "_smtc_broadcast_server") and self._smtc_broadcast_server:
+            try:
+                self._smtc_broadcast_server.stop()
+            except Exception:
+                pass
+            self._smtc_broadcast_server = None
+
         # Close Discord IPC connection
         if hasattr(self, "_discord_ipc"):
             try:
@@ -1237,9 +1274,10 @@ class DisplayManager:
         """Background thread that polls SMTC every 200ms using a persistent event loop."""
         import ctypes
         try:
-            ctypes.windll.ole32.CoInitialize(0)
+            # COINIT_MULTITHREADED (0x0) is required for WinRT async without a Windows message pump
+            ctypes.windll.ole32.CoInitializeEx(None, 0)
         except Exception as e:
-            logger.warning(f"CoInitialize failed: {e}")
+            logger.warning(f"CoInitializeEx failed: {e}")
 
         logger.info("SMTC poll loop started")
 
@@ -1253,6 +1291,12 @@ class DisplayManager:
                             self._smtc_data = data
                         finally:
                             self._smtc_lock.release()
+                    
+                    try:
+                        from src.SMTCBroadcast import broadcast_state
+                        broadcast_state.update(data)
+                    except Exception:
+                        pass
                     
                     # Log occasionally if media found
                     # if data and data.get("title"):
@@ -1290,7 +1334,7 @@ class DisplayManager:
             # Re-initialize COM for this thread
             try:
                 ctypes.windll.ole32.CoUninitialize()
-                ctypes.windll.ole32.CoInitialize(0)
+                ctypes.windll.ole32.CoInitializeEx(None, 0)
             except Exception:
                 pass
 

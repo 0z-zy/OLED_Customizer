@@ -51,7 +51,9 @@ class UserPreferences:
         "headset_hid_sync_enabled": False,
         "discord_local_port": 8888,
         "show_headset_battery": False,
-        "show_battery_percent": False
+        "show_battery_percent": False,
+        "smtc_broadcast_enabled": False,
+        "smtc_broadcast_port": 1231
     }
 
     def __init__(self):

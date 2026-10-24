@@ -152,6 +152,18 @@ class ExtensionHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_GET(self):
+        if self.path == '/media' or self.path.startswith('/media?'):
+            from src.SMTCBroadcast import broadcast_state
+            data = broadcast_state.to_json()
+            body = json.dumps(data, ensure_ascii=False).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         # Handle Discord OAuth Redirect: http://localhost:PORT/?code=XYZ
         from urllib.parse import urlparse, parse_qs
         query = urlparse(self.path).query
@@ -177,7 +189,7 @@ class ExtensionHandler(BaseHTTPRequestHandler):
         # Handle CORS preflight
         self.send_response(204)
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.send_header('Access-Control-Allow-Private-Network', 'true')
         self.end_headers()

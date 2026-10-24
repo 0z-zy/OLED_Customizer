@@ -68,6 +68,7 @@ problem_pkgs = [
     'pynput', 'winrt', 'winrt.windows.foundation', 
     'winrt.windows.foundation.collections', 'winrt.windows.storage',
     'winrt.windows.media.control',
+    'winrt.windows.storage.streams',
     'wmi', 'pythonnet', 'psutil',
     'HardwareMonitor'
 ]

@@ -1,5 +1,10 @@
 import asyncio
+import base64
 from datetime import datetime, timezone
+try:
+    import winrt.windows.foundation.collections
+except Exception:
+    pass
 from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
 from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionPlaybackStatus
 import logging
@@ -16,6 +21,8 @@ class WindowsMedia:
     def __init__(self):
         self.manager = None
         self._logged_once = set()
+        self._last_thumb_track = None
+        self._last_thumbnail_base64 = ""
 
     def _log_once(self, key, msg, *args):
         """Log a recurring failure only the first time.
@@ -94,6 +101,32 @@ class WindowsMedia:
         except Exception as e:
             logger.warning(f"Failed to request MediaManager: {e}")
 
+    async def _read_thumbnail(self, thumb_ref):
+        """Read the thumbnail stream into a base64 data URI."""
+        if not thumb_ref:
+            return ""
+        try:
+            from winrt.windows.storage.streams import DataReader, Buffer, InputStreamOptions
+            readable_stream = await asyncio.wait_for(
+                thumb_ref.open_read_async(), timeout=2.0
+            )
+            size = readable_stream.size
+            if size == 0:
+                return ""
+            buffer = Buffer(size)
+            await asyncio.wait_for(
+                readable_stream.read_async(buffer, size, InputStreamOptions.READ_AHEAD),
+                timeout=2.0
+            )
+            reader = DataReader.from_buffer(buffer)
+            byte_array = bytearray(buffer.length)
+            reader.read_bytes(byte_array)
+            b64 = base64.b64encode(bytes(byte_array)).decode("ascii")
+            return f"data:image/jpeg;base64,{b64}"
+        except Exception as e:
+            self._log_once("thumb_read", "Thumbnail read failed: %s", e)
+            return ""
+
     async def get_media_info(self):
         try:
             await self._ensure_manager()
@@ -114,27 +147,32 @@ class WindowsMedia:
 
             current_session = None
             
-            
-            # DEBUG: Log all sessions
-            session_list = list(sessions) if sessions else []
-            # logger.info(f"SMTC Sessions Found: {len(session_list)}")
+            # Safely convert sessions to a list
+            session_list = []
+            if sessions:
+                try:
+                    session_list = list(sessions)
+                except Exception as e:
+                    self._log_once("iter_sessions", "Failed to iterate sessions: %s", e)
+                    session_list = []
             
             # Priority 1: Find a PLAYING session (that passes validation)
-            if sessions:
-                for session in sessions:
+            if session_list:
+                for session in session_list:
                     try:
                         if not self._is_valid_session(session):
                             continue
                         info = session.get_playback_info()
                         if info and info.playback_status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.PLAYING:
                             current_session = session
+                            break
                     except (OSError, RuntimeError):
                         # Skip sessions with COM errors
                         continue
             
             # Priority 2: Fallback — find any valid PAUSED session
-            if not current_session and sessions:
-                for session in sessions:
+            if not current_session and session_list:
+                for session in session_list:
                     try:
                         if self._is_valid_session(session):
                             current_session = session
@@ -154,6 +192,8 @@ class WindowsMedia:
             
             # If still nothing, bail
             if not current_session:
+                self._last_thumb_track = None
+                self._last_thumbnail_base64 = ""
                 return {}
 
             # Now proceed with current_session...
@@ -169,13 +209,26 @@ class WindowsMedia:
                 info = None
                 
             if not info:
+                self._last_thumb_track = None
+                self._last_thumbnail_base64 = ""
                 return {}
 
             timeline = current_session.get_timeline_properties()
 
-            title = info.title
-            artist = info.artist
-            
+            title = info.title or ""
+            artist = info.artist or ""
+            album = getattr(info, "album_title", "") or ""
+
+            # Only read and base64-encode thumbnail on track change
+            track_key = (title, artist, album)
+            if track_key != self._last_thumb_track:
+                self._last_thumb_track = track_key
+                thumb_ref = getattr(info, "thumbnail", None)
+                if thumb_ref:
+                    self._last_thumbnail_base64 = await self._read_thumbnail(thumb_ref)
+                else:
+                    self._last_thumbnail_base64 = ""
+
             paused = True
             playback_info = current_session.get_playback_info()
             if playback_info:
@@ -207,7 +260,7 @@ class WindowsMedia:
                     # 1 tick = 100ns. 10,000,000 ticks = 1s.
                     position = pos_td / 10_000_000
                 elif hasattr(pos_td, "duration"): 
-                     position = pos_td.duration / 10_000_000
+                    position = pos_td.duration / 10_000_000
                 
                 # EXTRAPOLATION: SMTC updates position only on state change.
                 # We must add (Now - LastUpdatedTime) if playing.
@@ -220,38 +273,40 @@ class WindowsMedia:
                     is_playing = True
 
                 if is_playing and hasattr(timeline, "last_updated_time"):
-                     last_updated = timeline.last_updated_time
-                     # winrt datetime is usually aware/UTC. 
-                     # We need current time in same timezone.
-                     # Simplified: If last_updated is recent, difference is added.
-                     
-                     # Create a simple way to get 'now' compatible with whatever timeline uses
-                     # Usually winrt returns a standard python datetime if pywinrt is good.
-                     if last_updated:
-                         # Ensure we use UTC to match usually
-                         now = datetime.now(timezone.utc)
-                         diff = (now - last_updated).total_seconds()
-                         if diff > 0:
-                             position += diff
+                    last_updated = timeline.last_updated_time
+                    # winrt datetime is usually aware/UTC. 
+                    # We need current time in same timezone.
+                    # Simplified: If last_updated is recent, difference is added.
+                    
+                    # Create a simple way to get 'now' compatible with whatever timeline uses
+                    # Usually winrt returns a standard python datetime if pywinrt is good.
+                    if last_updated:
+                        # Ensure we use UTC to match usually
+                        now = datetime.now(timezone.utc)
+                        diff = (now - last_updated).total_seconds()
+                        if diff > 0:
+                            position += diff
 
                 if hasattr(end_td, "total_seconds"):
                     duration = end_td.total_seconds()
                 elif isinstance(end_td, int):
                     duration = end_td / 10_000_000
                 elif hasattr(end_td, "duration"):
-                     duration = end_td.duration / 10_000_000
+                    duration = end_td.duration / 10_000_000
                 
                 # FALLBACK: If duration is 0, check max_seek_time (common in browsers)
                 if duration == 0 and hasattr(timeline, "max_seek_time"):
                     mst = timeline.max_seek_time
                     if hasattr(mst, "total_seconds"):
-                         duration = mst.total_seconds()
+                        duration = mst.total_seconds()
                     elif isinstance(mst, int):
-                         duration = mst / 10_000_000
+                        duration = mst / 10_000_000
             
             return {
                 "title": title,
                 "artist": artist,
+                "album": album,
+                "cover": self._last_thumbnail_base64,
                 "paused": paused,
                 "progress": int(position * 1000) if position != -1 else -1,
                 "duration": int(duration * 1000) if duration > 0 else -1,

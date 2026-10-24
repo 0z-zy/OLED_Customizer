@@ -336,6 +336,8 @@ class SettingsGUI:
         self.vars["discord_client_secret"] = tk.StringVar(value=self.prefs.get_preference("discord_client_secret") or "")
         self.vars["headset_hid_sync_enabled"] = tk.BooleanVar(value=bool(self.prefs.get_preference("headset_hid_sync_enabled")))
         self.vars["debug_enabled"] = tk.BooleanVar(value=bool(self.prefs.get_preference("debug_enabled")))
+        self.vars["smtc_broadcast_enabled"] = tk.BooleanVar(value=bool(self.prefs.get_preference("smtc_broadcast_enabled")))
+        self.vars["smtc_broadcast_port"] = tk.StringVar(value=str(self.prefs.get_preference("smtc_broadcast_port") or "1231"))
 
     def _create_pages(self):
         # General
@@ -418,6 +420,10 @@ class SettingsGUI:
         self._entry_row(p_adv, "Discord Port", self.vars["discord_local_port"], width=25)
         self.discord_btn = tk.Button(p_adv, text="🔗 Connect Discord", bg=Colors.CARD_BG, fg=Colors.TEXT_MAIN, relief="flat", cursor="hand2", command=self._authorize_discord_action)
         self.discord_btn.pack(pady=10)
+        tk.Frame(p_adv, bg=Colors.CONTENT, height=10).pack()
+        self._header(p_adv, "📡 SMTC Media Broadcast")
+        self._toggle_row(p_adv, "Enable Broadcast (SignalRGB / Web)", self.vars["smtc_broadcast_enabled"])
+        self._entry_row(p_adv, "Broadcast Port", self.vars["smtc_broadcast_port"], width=10)
         self.pages["Advanced"] = p_adv
 
         # Backups
@@ -607,7 +613,7 @@ class SettingsGUI:
                     val = self.DROPDOWN_MAPS[k].get(val, val)
 
                 # Integer fields
-                if k in ["scrollbar_padding", "text_padding_left", "local_port", "discord_local_port", "spotify_fetch_delay", "hw_polling_interval"]:
+                if k in ["scrollbar_padding", "text_padding_left", "local_port", "discord_local_port", "smtc_broadcast_port", "spotify_fetch_delay", "hw_polling_interval"]:
                     try: val = int(val)
                     except: val = UserPreferences.DEFAULT.get(k, 0)
                 
