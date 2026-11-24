@@ -247,10 +247,13 @@ fn spawn_render_loop(
             let mut last_ram_check = Instant::now() - Duration::from_secs(10);
             let mut cached_ram_mb = process_memory_mb();
             let mut last_track_sig = String::new();
+            let mut last_pos_tick = Instant::now();
             let mut sub_tick: u32 = 0;
 
             while !stop_flag.load(Ordering::Relaxed) {
                 let tick_start = Instant::now();
+                let dt_ms = tick_start.duration_since(last_pos_tick).as_secs_f64() * 1000.0;
+                last_pos_tick = tick_start;
                 sub_tick = sub_tick.wrapping_add(1);
 
                 // 1. Drain hotkey actions
@@ -295,28 +298,56 @@ fn spawn_render_loop(
                     cfg.signalrgb_push_include_title,
                     media.playing,
                     &media.title,
+                    &media.artist,
+                    &media.album,
+                    media.cover_bytes.as_deref(),
                     &media.cover_colors,
                 );
 
                 // Update player state from live SMTC (or demo fallback in explicit Player preview)
                 let track_sig = format!("{}|{}", media.artist, media.title);
                 if media.active {
+                    let rate = if media.playback_rate > 0.0 {
+                        media.playback_rate
+                    } else {
+                        1.0
+                    };
+                    let dur_ms = media.duration_ms.max(1);
+                    let live_pos_ms = if media.playing {
+                        let extra = media
+                            .position_updated_at
+                            .map(|t| (t.elapsed().as_secs_f64() * rate * 1000.0).round() as u64)
+                            .unwrap_or(0);
+                        media.position_ms.saturating_add(extra).min(dur_ms)
+                    } else {
+                        media.position_ms.min(dur_ms)
+                    };
+
                     if track_sig != last_track_sig {
                         last_track_sig = track_sig;
                         player.update_track(
                             &media.title,
                             &media.artist,
-                            media.position_ms,
-                            media.duration_ms,
+                            live_pos_ms,
+                            dur_ms,
                             !media.playing,
                             media.source.unwrap_or(MediaSource::Generic),
                         );
                     } else {
                         player.paused = !media.playing;
-                        if (media.position_ms as i64 - player.position_ms as i64).abs() > 1500 {
-                            player.position_ms = media.position_ms;
+                        player.duration_ms = dur_ms;
+                        if !media.playing {
+                            player.position_ms = live_pos_ms;
+                        } else {
+                            player.position_ms = player
+                                .position_ms
+                                .saturating_add((dt_ms * rate).round() as u64)
+                                .min(dur_ms);
+                            let diff = live_pos_ms as i64 - player.position_ms as i64;
+                            if diff.abs() > 1500 || diff > 250 {
+                                player.position_ms = live_pos_ms;
+                            }
                         }
-                        player.duration_ms = media.duration_ms.max(1);
                     }
                 }
                 let want_spectrum = cfg.player_style == PlayerStyle::SpectrumTicker

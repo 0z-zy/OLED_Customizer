@@ -25,6 +25,31 @@ struct MediaJson<'a> {
     title: &'a str,
     artist: &'a str,
     album: &'a str,
+    cover: String,
+}
+
+fn encode_base64(bytes: &[u8]) -> String {
+    const TBL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TBL[((n >> 18) & 0x3F) as usize] as char);
+        out.push(TBL[((n >> 12) & 0x3F) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            TBL[((n >> 6) & 0x3F) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TBL[(n & 0x3F) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
 }
 
 pub struct BroadcastServer {
@@ -57,17 +82,23 @@ impl BroadcastServer {
                             let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
                             if let Ok(n) = stream.read(&mut buf) {
                                 let req = String::from_utf8_lossy(&buf[..n]);
-                                let path = req
+                                let mut parts = req
                                     .lines()
                                     .next()
-                                    .and_then(|l| l.split_whitespace().nth(1))
-                                    .unwrap_or("/");
+                                    .unwrap_or("")
+                                    .split_whitespace();
+                                let method = parts.next().unwrap_or("GET");
+                                let path = parts.next().unwrap_or("/");
 
-                                if path.starts_with("/cover") {
+                                if method == "OPTIONS" {
+                                    let _ = stream.write_all(
+                                        b"HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nContent-Length: 0\r\n\r\n",
+                                    );
+                                } else if path.starts_with("/cover") {
                                     let guard = state.read().unwrap();
                                     if let Some(ref bytes) = guard.cover_bytes {
                                         let hdr = format!(
-                                            "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-cache\r\nContent-Length: {}\r\n\r\n",
+                                            "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-cache, no-store, must-revalidate\r\nContent-Length: {}\r\n\r\n",
                                             guard.cover_mime,
                                             bytes.len()
                                         );
@@ -80,11 +111,19 @@ impl BroadcastServer {
                                     }
                                 } else {
                                     let guard = state.read().unwrap();
+                                    let cover = guard
+                                        .cover_bytes
+                                        .as_deref()
+                                        .map(|b| {
+                                            format!("data:{};base64,{}", guard.cover_mime, encode_base64(b))
+                                        })
+                                        .unwrap_or_default();
                                     let json = serde_json::to_string(&MediaJson {
                                         playing: guard.playing,
                                         title: &guard.title,
                                         artist: &guard.artist,
                                         album: &guard.album,
+                                        cover,
                                     })
                                     .unwrap_or_else(|_| "{}".to_string());
                                     let resp = format!(

@@ -116,9 +116,6 @@ impl PlayerView {
         self.title_scroll.tick();
         self.artist_scroll.tick();
         self.combined_scroll.tick();
-        if !self.paused && self.position_ms < self.duration_ms {
-            self.position_ms = (self.position_ms + 100).min(self.duration_ms);
-        }
     }
 
     fn icon_18(&self) -> &'static [&'static str] {

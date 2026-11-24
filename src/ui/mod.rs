@@ -874,16 +874,69 @@ impl eframe::App for OledApp {
                             if toggle_row(
                                 ui,
                                 "SMTC HTTP Broadcast",
-                                "Serves GET /media on 127.0.0.1",
+                                "Serves GET /media and /cover.jpg on 127.0.0.1",
                                 &mut self.draft.smtc_broadcast_enabled,
                             ) {
                                 self.push_draft();
                             }
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new("Broadcast Port").size(12.5).color(TEXT_DIM));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui
+                                        .add(
+                                            egui::DragValue::new(&mut self.draft.smtc_broadcast_port)
+                                                .range(1024..=65535)
+                                                .speed(1),
+                                        )
+                                        .changed()
+                                    {
+                                        self.push_draft();
+                                    }
+                                });
+                            });
+                            ui.separator();
                             if toggle_row(
                                 ui,
                                 "SignalRGB Album Color Push",
-                                "Pushes 5 dominant colors to SignalRGB canvas",
+                                "Pushes play state & 5 dominant album colors to SignalRGB",
                                 &mut self.draft.signalrgb_push_enabled,
+                            ) {
+                                self.push_draft();
+                            }
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new("SignalRGB Port").size(12.5).color(TEXT_DIM));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui
+                                        .add(
+                                            egui::DragValue::new(&mut self.draft.signalrgb_push_port)
+                                                .range(1024..=65535)
+                                                .speed(1),
+                                        )
+                                        .changed()
+                                    {
+                                        self.push_draft();
+                                    }
+                                });
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new("SignalRGB Sender").size(12.5).color(TEXT_DIM));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui
+                                        .add(
+                                            egui::TextEdit::singleline(&mut self.draft.signalrgb_push_sender)
+                                                .desired_width(150.0),
+                                        )
+                                        .changed()
+                                    {
+                                        self.push_draft();
+                                    }
+                                });
+                            });
+                            if toggle_row(
+                                ui,
+                                "Include Track Title in SignalRGB Event",
+                                "Sends sanitized track title (t.<title>) alongside colors",
+                                &mut self.draft.signalrgb_push_include_title,
                             ) {
                                 self.push_draft();
                             }

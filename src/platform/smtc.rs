@@ -3,7 +3,7 @@ use std::sync::{
     Arc, RwLock,
 };
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSessionManager,
@@ -15,7 +15,7 @@ use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITH
 use crate::oled::views::player::MediaSource;
 use crate::services::signalrgb::extract_dominant_colors;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct MediaState {
     pub active: bool,
     pub playing: bool,
@@ -24,9 +24,30 @@ pub struct MediaState {
     pub album: String,
     pub source: Option<MediaSource>,
     pub position_ms: u64,
+    pub position_updated_at: Option<Instant>,
+    pub playback_rate: f64,
     pub duration_ms: u64,
     pub cover_bytes: Option<Vec<u8>>,
     pub cover_colors: Vec<String>,
+}
+
+impl Default for MediaState {
+    fn default() -> Self {
+        Self {
+            active: false,
+            playing: false,
+            title: String::new(),
+            artist: String::new(),
+            album: String::new(),
+            source: None,
+            position_ms: 0,
+            position_updated_at: None,
+            playback_rate: 1.0,
+            duration_ms: 0,
+            cover_bytes: None,
+            cover_colors: Vec::new(),
+        }
+    }
 }
 
 pub fn start_smtc_poller(shared: Arc<RwLock<MediaState>>, stop: Arc<AtomicBool>) {
@@ -119,12 +140,51 @@ pub fn start_smtc_poller(shared: Arc<RwLock<MediaState>>, stop: Arc<AtomicBool>)
 
                                         let mut pos_ms = 0u64;
                                         let mut dur_ms = 1u64;
+                                        let rate = info
+                                            .PlaybackRate()
+                                            .ok()
+                                            .and_then(|r| r.Value().ok())
+                                            .filter(|r| r.is_finite() && *r > 0.0)
+                                            .unwrap_or(1.0)
+                                            .clamp(0.25, 4.0);
+
                                         if let Ok(tl) = sess.GetTimelineProperties() {
+                                            if let Ok(end) = tl.EndTime() {
+                                                let ms = end.Duration / 10_000;
+                                                if ms > 0 {
+                                                    dur_ms = ms as u64;
+                                                }
+                                            }
+                                            if dur_ms <= 1 {
+                                                if let Ok(mst) = tl.MaxSeekTime() {
+                                                    let ms = mst.Duration / 10_000;
+                                                    if ms > 0 {
+                                                        dur_ms = ms as u64;
+                                                    }
+                                                }
+                                            }
                                             if let Ok(pos) = tl.Position() {
                                                 pos_ms = (pos.Duration / 10_000).max(0) as u64;
                                             }
-                                            if let Ok(end) = tl.EndTime() {
-                                                dur_ms = ((end.Duration / 10_000).max(1)) as u64;
+                                            const UNIX_TO_FILETIME_MS: i64 = 11_644_473_600_000;
+                                            if playing {
+                                                if let Ok(lu) = tl.LastUpdatedTime() {
+                                                    let lu_ms = lu.UniversalTime / 10_000;
+                                                    let now_ft_ms = chrono::Utc::now()
+                                                        .timestamp_millis()
+                                                        + UNIX_TO_FILETIME_MS;
+                                                    let delta_ms = now_ft_ms - lu_ms;
+                                                    if lu_ms > UNIX_TO_FILETIME_MS
+                                                        && delta_ms > 0
+                                                        && delta_ms < 86_400_000
+                                                    {
+                                                        let added =
+                                                            (delta_ms as f64 * rate).round() as u64;
+                                                        pos_ms = pos_ms
+                                                            .saturating_add(added)
+                                                            .min(dur_ms);
+                                                    }
+                                                }
                                             }
                                         }
 
@@ -147,6 +207,8 @@ pub fn start_smtc_poller(shared: Arc<RwLock<MediaState>>, stop: Arc<AtomicBool>)
                                                 album,
                                                 source: Some(source),
                                                 position_ms: pos_ms,
+                                                position_updated_at: Some(Instant::now()),
+                                                playback_rate: rate,
                                                 duration_ms: dur_ms,
                                                 cover_bytes: cached_cover.clone(),
                                                 cover_colors: cached_colors.clone(),
