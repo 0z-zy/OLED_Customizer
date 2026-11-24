@@ -1,37 +1,36 @@
-__pycache__/
-*.py[cod]
-*$py.class
-*.spec
-.env
-venv/
-.idea/
-.vscode/
-
-# Build artifacts
-dist/
-build/
+# Rust build & runtime artifacts
+/target/
+oled-rs/
+*.old
 *.exe
-plan.md
+!assets/sensors/oled_sensors.exe
+/preview_sheet.png
 
-# Lite Version (Experimental)
-lite_backup.zip
+# Scratch / concept files
+assets/concepts/
+icon_concepts.png
 
-# Local Plans & Notes (Private)
-*.md
-!README.md
-
-# Except the main executables
-!OLED-Customizer.exe
-!OLED-Customizer.spec
-!uninstall.exe
-
-# User specific
-config.json
-credentials.json
-yt_nowplaying.json
+# Private & local environment files
 *.pem
 *.crx
-.lock
-debug_fs.txt
-build.ps1
+*.zip
+*.md
+!README.md
+plan.txt
+config.json
+config_v2.json
+settings.json
+credentials.json
+yt_nowplaying.json
+.env
+.vscode/
+.idea/
+.claude/
+venv/
 tools/
+dist/
+build/
+build.ps1
+__pycache__/
+debug_fs.txt
+.lock

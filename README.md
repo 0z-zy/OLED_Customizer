@@ -1,150 +1,63 @@
 # 🎹 OLED Customizer
 
-**The ultimate music and system dashboard for your SteelSeries Keyboard.**
+**Lightweight native Rust dashboard for SteelSeries 128×40 OLED keyboards.**
 
-![Version](https://img.shields.io/badge/version-1.7.0-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-2.0.0-white?style=for-the-badge)
+![Built with Rust](https://img.shields.io/badge/Rust-native-orange?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey?style=for-the-badge)
 
-OLED Customizer transforms your keyboard's small screen into a powerful, high-contrast information hub. Whether it's tracking your rhythm on Spotify/YouTube or monitoring your PC's vitals during a gaming session, OLED Customizer does it with style and zero flicker.
+OLED Customizer transforms your SteelSeries keyboard's 128×40 monochrome OLED screen into a zero-flicker clock, media player, hardware monitor, volume/mic HUD, and quick calculator — while sipping **~5 MB RAM** in the background and rendering frames in **~0.13 ms**.
+
+![OLED Preview Sheet](assets/preview_sheet.png)
+
+> Looking for the original Python version (v1.x)? It's preserved on the [`Python`](https://github.com/0z-zy/OLED_Customizer/tree/Python) branch.
 
 ---
 
-## 📋 Table of Contents
+## ✨ What's New in v2.0.0 (Native Rust)
 
-- [🚀 Key Highlights](#-key-highlights)
-- [⌨️ Hotkeys](#️-hotkeys)
-- [🎨 Advanced Customization](#-advanced-customization)
-- [🛠️ Quick Setup](#️-quick-setup)
-- [🎵 Spotify API Setup](#-spotify-api-setup)
-- [📚 Acknowledgments](#-acknowledgments)
-
----
-
-## 🚀 Key Highlights
-
-### 🎵 Dynamic Media Dashboard
-
-- **Spotify & YouTube Support**: Real-time integration with Spotify (via API) and Windows media (via SMTC).
-- **Intelligent Switching**: Seamlessly transitions between music info and the clock.
-- **Pixel-Perfect Icons**: Custom YouTube and Media icons designed specifically for the 128x40 display.
-
-| Spotify | YouTube | Generic Media |
-| :---: | :---: | :---: |
-| ![Spotify](content/demos/demo_player.gif) | ![YouTube](content/demos/demo_player_youtube.gif) | ![Generic](content/demos/demo_player_generic.gif) |
-
-### 🌡️ Ghost-Monitor (Hardware Stats)
-
-- **Instant Peek**: Tap **INS (Insert)** to summon your system stats over any screen.
-- **Thermal Guard**: High-accuracy monitoring for CPU & GPU (Usage & Temps).
-- **Memory Tracking**: See exactly how much RAM you have left at a glance.
-- **🎮 Game FPS**: Live FPS counter when a game is running (requires Admin).
-- **GPU Selection**: Choose which GPU to monitor in settings.
-- **Custom Art**: Unique 12x12 pixel art icons for a premium look.
-
-![HW Monitor Demo](content/demos/demo_hw_monitor.gif)
-
-### 🔊 Reimagined Volume Control
-
-- **Adaptive Icons**: Visual feedback changes with your volume level.
-- **Discord Sync**: A microphone icon appears automatically when you're in Discord.
-- **Global Mute**: Press your mute hotkey to toggle mic — supports **keyboard keys** and **mouse side buttons** (Mouse 4/5).
-- **Nuclear Mute**: If Windows can't find a default mic, it mutes **all** active capture devices at once.
-- **Dual Hotkeys**: Set a primary and optional secondary mute key in settings.
-
-![Volume Demo](content/demos/demo_volume.gif)
-
-### 🖩 Calculator
-
-- **Quick Access**: Hold **Ctrl + Insert** to toggle a calculator overlay on your OLED.
-- **Numpad Input**: Type with your numpad — keys are captured so games don't see them.
-- **Parentheses**: Full support for `(` and `)` on any keyboard layout.
+- **Ultra-Light Split Architecture**: Headless Win32 tray daemon (~5 MB RAM) + on-demand GPU settings window (`eframe`/`egui`) that launches only when you open Settings.
+- **Original Fonts, Razor-Sharp**: Renders your classic `DS-Digital`, `Verdana Bold`, and `Munro Small` TrueType fonts via native hinted Windows GDI (`NONANTIALIASED_QUALITY`) for crisp 1-bit pixel edges.
+- **6 Clock Faces**:
+  - **Clean Digital**, **Big Bold**, **Split Tech**, **Right Calendar** *(new — bottom-left clock, inline battery + `%` top-left, calendar card on the right)*, **Modern Analog**, and **Minimal Pill**.
+  - Upgraded proportional battery icon with smooth charge fill and optional inline/under-icon percentage.
+- **5 Media Player Styles**:
+  - **Modern Card** (borderless source icons + upgraded scrub bar), **Compact Bar**, **Centered Studio**, **Spectrum Ticker** (real-time WASAPI loopback 512-pt FFT 20-band audio visualizer + peak hold), and **Ultra Minimal**.
+- **Hardware Monitor (3 Layouts)**:
+  - **3-Column Tech**, **Meter Bars**, and **Compact Split** — powered by native NVML (NVIDIA GPU), embedded LibreHardwareMonitor helper (CPU temps), and embedded `PresentMon.dll` (live game FPS).
+- **Headset Battery & Mic Sync**: Direct USB HID battery & mute sync for HyperX / NGENUITY headsets (works even without NGENUITY running).
+- **Integrations**: SteelSeries GameSense, per-key RGB color sync, localhost SMTC HTTP Broadcast (`GET /media`), and SignalRGB album-color push.
+- **One-Click Admin Startup**: Task Scheduler integration with automatic cold-start elevation so CPU temperature & FPS sensors work seamlessly after a single setup.
 
 ---
 
-## ⌨️ Hotkeys
+## ⌨️ Default Hotkeys
 
 | Action | Default Key | Notes |
 | :--- | :--- | :--- |
-| Show System Stats | `Insert` | Quick peek at CPU/GPU/RAM |
-| Mute Microphone (Primary) | `Pause` | Supports keyboard & mouse buttons |
-| Mute Microphone (Optional) | *Not set* | Bind a second key in settings |
-| Toggle Calculator | `Ctrl + Insert` | Numpad input, `Esc` to close |
-
-All hotkeys work globally — even inside fullscreen games.
-
----
-
-## 🎨 Advanced Customization
-
-Access `%APPDATA%/OLED Customizer/config.json` or use the **Settings GUI** to adjust:
-
-- **Clock Designs**: Analog, Big Timer, Date Focused, and more.
-- **Scrollbar Margin**: Adjusts the horizontal width and padding.
-- **Text Indentation**: Shifts titles to avoid overlapping app icons.
-
-### 🕰️ Clock Gallery
-
-| Style | Preview |
-| :--- | :--- |
-| **Standard** | ![Standard](content/demos/demo_clock.gif) |
-| **Analog** | ![Analog](content/demos/demo_clock_analog.gif) |
-| **Big Timer** | ![Big](content/demos/demo_clock_big.gif) |
-| **Date Focused** | ![Date](content/demos/demo_clock_date.gif) |
+| Peek System Stats | `Insert` | Temporarily shows Hardware Monitor |
+| Mute Microphone (Primary) | `Pause` | Supports keyboard keys & Mouse 4/5 |
+| Mute Microphone (Secondary) | *Not set* | Bind a second key in Settings |
+| Calculator Overlay | `Ctrl + Insert` | Numpad input (`Esc` to close) |
 
 ---
 
 ## 🛠️ Quick Setup
 
-> [!IMPORTANT]
-> **Admin Access Required**: The application must be run as Administrator to read hardware sensors (CPU/GPU temperatures).
-
-### 1. Requirements
-
-- **SteelSeries GG**: Ensure Engine 3 or GG is running (can auto-launch via settings).
-- **Windows 10/11**: Fully optimized for modern Windows environments.
-- **Spotify Account**: Only needed if you want Spotify-specific features.
-
-### 2. Getting Started
-
-1. Download the latest **`OLED-Customizer.exe`** from [Releases](https://github.com/0z-zy/OLED_Customizer/releases).
-2. Run the application (it will sit quietly in your System Tray).
-3. **Right-Click the Tray Icon** to access settings.
+1. Download **`OLED-Customizer.exe`** from [Releases](https://github.com/0z-zy/OLED_Customizer/releases).
+2. Make sure **SteelSeries GG** is installed (and OLED GameSense is active).
+3. Run `OLED-Customizer.exe`.
+4. *(Optional, for CPU Temp & Game FPS)* Click **Enable Admin via Task Scheduler** in the top banner once — it registers a Windows logon task and remembers your preference.
 
 ---
 
-## 🎵 Spotify API Setup
+## 🔧 Build from Source
 
-To sync with Spotify, you need to create a free application on the Spotify Developer portal.
+Requires the [Rust toolchain](https://rustup.rs/) on Windows:
 
-> [!TIP]
-> This only takes 2 minutes and is much more stable than standard Windows media detection.
+```powershell
+cargo build --release --bin oled-customizer
+```
 
-### Step 1: Create Your App
-
-1. Visit the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard).
-2. Click **"Create app"** and use these settings:
-    - **Redirect URIs**: `http://127.0.0.1:2408/callback`
-    - **API/SDK**: Select **"Web API"**.
-
-### Step 2: Configure Credentials
-
-1. Copy your **Client ID** and **Client Secret**.
-2. In the **OLED Customizer Settings**:
-    - Enable **"Spotify Integration"**.
-    - Paste your credentials and set the port to `2408`.
-3. Click **SAVE** and restart the app.
-
----
-
-## 📚 Acknowledgments
-
-OLED Customizer is a highly evolved rebrand, inspired by the foundations of [SteelSeries-Spotify-Linker](https://github.com/Firewee/SteelSeries-Spotify-Linker).
-
-- **Backend**: GameSense™ SDK
-- **Sensors**: LibreHardwareMonitor
-- **UI**: Hand-crafted 128x40 iconography
-
----
-
-**Crafted for enthusiasts. Rebranded and Enhanced by [0z-zy](https://github.com/0z-zy).**
+The compiled binary will be at `target\release\oled-customizer.exe`.
