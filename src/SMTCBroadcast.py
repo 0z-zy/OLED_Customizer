@@ -9,6 +9,7 @@ The server reads from a shared state that the SMTC poll loop in DisplayManager
 maintains — no extra Windows queries per request.
 """
 
+import base64
 import json
 import logging
 import threading
@@ -22,35 +23,58 @@ class SMTCBroadcastState:
 
     def __init__(self):
         self._lock = threading.Lock()
+        self.changed_event = threading.Event()
         self.playing = False
         self.title = ""
         self.artist = ""
         self.album = ""
         self.cover = ""
+        self._empty_streak = 0
 
     def update(self, smtc_data):
         """Called from the SMTC poll loop with the latest data dict."""
-        if not smtc_data:
+        if not smtc_data or not smtc_data.get("title"):
             with self._lock:
+                self._empty_streak += 1
+                if self._empty_streak < 10:
+                    if self.playing:
+                        self.playing = False
+                        self.changed_event.set()
+                    return
+                was_active = self.playing or bool(self.title)
                 self.playing = False
                 self.title = ""
                 self.artist = ""
                 self.album = ""
                 self.cover = ""
+            if was_active:
+                self.changed_event.set()
             return
 
         title = smtc_data.get("title") or ""
         artist = smtc_data.get("artist") or ""
         album = smtc_data.get("album") or ""
         paused = smtc_data.get("paused", True)
+        new_playing = not paused
         cover = smtc_data.get("cover") or ""
 
         with self._lock:
-            self.playing = not paused
+            self._empty_streak = 0
+            changed = (
+                self.playing != new_playing
+                or self.title != title
+                or self.artist != artist
+                or self.album != album
+                or self.cover != cover
+            )
+            self.playing = new_playing
             self.title = title
             self.artist = artist
             self.album = album
             self.cover = cover
+
+        if changed:
+            self.changed_event.set()
 
     def to_json(self):
         """Return a JSON-serializable dict snapshot."""
@@ -81,6 +105,27 @@ class _BroadcastHandler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             self.wfile.write(body)
+        elif self.path in ("/cover", "/cover.jpg", "/cover.png") or self.path.startswith(("/cover.jpg?", "/cover.png?", "/cover?")):
+            data = broadcast_state.to_json()
+            cover_uri = data.get("cover") or ""
+            if cover_uri and "," in cover_uri:
+                header, b64 = cover_uri.split(",", 1)
+                content_type = "image/png" if "png" in header else "image/jpeg"
+                try:
+                    img_bytes = base64.b64decode(b64)
+                    self.send_response(200)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                    self.send_header("Content-Length", str(len(img_bytes)))
+                    self.end_headers()
+                    self.wfile.write(img_bytes)
+                    return
+                except Exception as e:
+                    logger.debug("Failed decoding cover for HTTP client: %s", e)
+            self.send_response(404)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
         else:
             self.send_response(404)
             self.send_header("Access-Control-Allow-Origin", "*")

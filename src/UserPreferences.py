@@ -53,7 +53,11 @@ class UserPreferences:
         "show_headset_battery": False,
         "show_battery_percent": False,
         "smtc_broadcast_enabled": False,
-        "smtc_broadcast_port": 1231
+        "smtc_broadcast_port": 1231,
+        "signalrgb_push_enabled": False,
+        "signalrgb_push_port": 16034,
+        "signalrgb_push_sender": "OLED Customizer",
+        "signalrgb_push_include_title": False
     }
 
     def __init__(self):

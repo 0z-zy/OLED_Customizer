@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Media Ambience (Custom)</title>
+    <meta description="Ambient RGB lighting driven by your currently playing media's album art colors, pushed from the local media bridge via the SignalRGB canvas API." />
+    <meta publisher="VibeCoder" />
+
+    <!-- SignalRGB UI Controls -->
+    <meta property="animSpeed"       label="Animation Speed"   type="number"   min="1" max="10" default="3">
+    <meta property="glowSize"        label="Glow Intensity"    type="number"   min="1" max="10" default="5">
+    <meta property="brightness"      label="Brightness"        type="number"   min="0" max="100" default="80">
+    <meta property="pauseDimLevel"   label="Pause Dim Level"   type="number"   min="0" max="100" default="70">
+    <meta property="skipTransition"  label="Skip Transition"   type="combobox" values="Smooth Blend,Instant Snap,Flash Pulse,Fade Out-In" default="Smooth Blend">
+    <meta property="transitionSpeed" label="Transition Speed"  type="number"   min="1" max="10" default="5">
+    <meta property="audioReactive"   label="Audio Reactivity"  type="combobox" values="Off,Bass Beat Pulse,Heavy Bass Flash,Equalizer Waves,Audio Speed Surge" default="Bass Beat Pulse">
+    <meta property="audioGain"       label="Audio Sensitivity" type="number"   min="1" max="25" default="12">
+    <meta property="colorStyle"      label="Color Animation"   type="combobox" values="Side to Side,Duo-Tone Contrast,Swirling Aura,Horizontal Wave,Vertical Wave,Breathing Pulse,Static Gradient,Linear Drift" default="Side to Side">
+    <meta property="sweepDir"        label="Sweep Direction"   type="combobox" values="Side to Side,Up and Down,All Directions" default="Side to Side">
+    <meta property="colorCount"      label="Color Count"       type="combobox" values="1 Color,2 Colors,3 Colors,4 Colors,5 Colors" default="5 Colors">
+    <meta property="useArtwork"      label="Album Art Mode"    type="combobox" values="Off,On" default="Off">
+    <meta property="artMode"         label="Art Style"         type="combobox" values="Fit with Glow,Stretch Fill,Center Zoom,Pixelate" default="Fit with Glow">
+    <meta property="artBlur"         label="Art Blur"          type="number"   min="0" max="20" default="3">
+    <meta property="artMotion"       label="Art Motion"        type="combobox" values="Off,On" default="On">
+    <meta property="debugHud"        label="Debug HUD"         type="combobox" values="Off,On" default="Off">
+    <meta property="bridgePort"      label="Bridge Port"       type="number"   min="1000" max="65535" default="1239">
+</head>
+<body style="margin:0; padding:0; background:#000; overflow:hidden;">
+
+<canvas id="rgbCanvas" width="320" height="200"></canvas>
+
+<script>
+// ============================================
+//  MEDIA AMBIENCE - Custom SignalRGB Effect
+// ============================================
+//  Colors and cover art are PUSHED to this effect
+//  by OLED Customizer via SignalRGB's canvas event API:
+//  POST http://127.0.0.1:16034/canvas/event?sender=MediaAmbience&event=<payload>
+//
+//  Wire format:
+//    p.<0|1>|c.<30 hex chars>|t.<title>|i.<image_slot>
+// ============================================
+
+const BRIDGE_SENDER = 'MediaAmbience';
+
+const canvas = document.getElementById('rgbCanvas');
+const ctx = canvas.getContext('2d');
+const W = 320;
+const H = 200;
+
+// Offscreen 28x20 canvas for Screen Ambience style pixelated LED zone grid
+const pCanvas = document.createElement('canvas');
+pCanvas.width = 28;
+pCanvas.height = 20;
+const pCtx = pCanvas.getContext('2d');
+
+// ------------------------------------------
+//  COLOR & TRANSITION STATE
+// ------------------------------------------
+let currentColors = [
+    { r: 20, g: 25, b: 38 },
+    { r: 28, g: 37, b: 65 },
+    { r: 45, g: 58, b: 84 },
+    { r: 65, g: 90, b: 119 },
+    { r: 119, g: 141, b: 169 }
+];
+let targetColors = currentColors.map(c => ({ ...c }));
+
+let time = 0;
+let isPaused = false;
+let lastTitle = null;
+let lastHexesString = null;
+let flashVal = 0.0;
+let fadeVal = 0.0;
+let pauseDimFactor = 1.0;
+let trackSkipBlend = 0.0;
+let bassPulse = 0.0;
+let bassEnergySmooth = 0.0;
+let audioPeak = -10.0;
+let audioFloor = -60.0;
+
+// Album Art Image State
+let coverImg = new Image();
+let coverLoaded = false;
+let currentSlot = '1';
+let coverSource = 'none';
+let coverStatus = 'idle';
+
+coverImg.onload = function() {
+    coverLoaded = true;
+    coverStatus = 'loaded ' + coverImg.naturalWidth + 'x' + coverImg.naturalHeight;
+};
+coverImg.onerror = function() {
+    coverLoaded = false;
+    coverStatus = 'error on ' + coverSource;
+};
+
+function loadAlbumArt(slot) {
+    var port = (typeof bridgePort !== 'undefined') ? bridgePort : 1239;
+    var stamp = Date.now();
+
+    // Priority 1: Pull directly from local port without saving to disk
+    // 1a. Try XHR to /media to get base64 data URI directly from memory
+    try {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', 'http://127.0.0.1:' + port + '/media', true);
+        xhr.timeout = 1000;
+        xhr.onload = function() {
+            if (xhr.status === 200) {
+                try {
+                    var resp = JSON.parse(xhr.responseText);
+                    if (resp && resp.cover && resp.cover.indexOf('data:') === 0) {
+                        coverSource = 'port ' + port + ' (json)';
+                        coverImg.src = resp.cover;
+                        return;
+                    }
+                } catch (e) {}
+            }
+            tryPortCoverJpg();
+        };
+        xhr.onerror = tryPortCoverJpg;
+        xhr.ontimeout = tryPortCoverJpg;
+        xhr.send();
+    } catch (e) {
+        tryPortCoverJpg();
+    }
+
+    // 1b. Try direct binary image from port: http://127.0.0.1:{port}/cover.jpg
+    function tryPortCoverJpg() {
+        var pImg = new Image();
+        pImg.onload = function() {
+            coverSource = 'port ' + port + ' (/cover.jpg)';
+            coverLoaded = true;
+            coverStatus = 'loaded ' + pImg.naturalWidth + 'x' + pImg.naturalHeight;
+            coverImg.src = pImg.src;
+        };
+        pImg.onerror = tryDiskFallbacks;
+        pImg.src = 'http://127.0.0.1:' + port + '/cover.jpg?t=' + stamp;
+    }
+
+    // Priority 2: Fallback to local files if SignalRGB webview blocks localhost HTTP
+    function tryDiskFallbacks() {
+        var candidates = [
+            'cover_' + (slot || '1') + '.jpg?t=' + stamp,
+            'current_cover.jpg?t=' + stamp
+        ];
+
+        function tryNextDisk(idx) {
+            if (idx >= candidates.length) {
+                coverStatus = 'all sources failed';
+                return;
+            }
+            var dImg = new Image();
+            dImg.onload = function() {
+                coverSource = 'disk (' + candidates[idx].split('?')[0] + ')';
+                coverLoaded = true;
+                coverStatus = 'loaded ' + dImg.naturalWidth + 'x' + dImg.naturalHeight;
+                coverImg.src = dImg.src;
+            };
+            dImg.onerror = function() {
+                tryNextDisk(idx + 1);
+            };
+            dImg.src = candidates[idx];
+        }
+
+        tryNextDisk(0);
+    }
+}
+
+// Initial load attempt
+loadAlbumArt('1');
+
+// DEBUG HUD (toggle with the "Debug HUD" checkbox)
+let dbg = 'waiting for bridge...';
+let evtCount = 0;
+
+// ------------------------------------------
+//  HELPER FUNCTIONS
+// ------------------------------------------
+
+function hexToRgb(hex) {
+    return {
+        r: parseInt(hex.substring(0, 2), 16),
+        g: parseInt(hex.substring(2, 4), 16),
+        b: parseInt(hex.substring(4, 6), 16)
+    };
+}
+
+// Perceived brightness — used to order the palette dark -> light
+function luma(c) {
+    return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+}
+
+// Smoothly blend color A toward color B by amount t (0-1)
+function lerpColor(a, b, t) {
+    return {
+        r: Math.round(a.r + (b.r - a.r) * t),
+        g: Math.round(a.g + (b.g - a.g) * t),
+        b: Math.round(a.b + (b.b - a.b) * t)
+    };
+}
+
+function rgb(c) {
+    return 'rgb(' + c.r + ',' + c.g + ',' + c.b + ')';
+}
+
+function rgba(c, a) {
+    return 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',' + a + ')';
+}
+
+// ------------------------------------------
+//  CANVAS API EVENTS (from OLED Customizer)
+// ------------------------------------------
+function onCanvasApiEvent(apiEvent) {
+    if (!apiEvent) return;
+    var s = apiEvent['sender'];
+    if (s !== BRIDGE_SENDER && s !== 'OLED Customizer') return;
+
+    var ev = apiEvent['event'];
+    var playing = null, title = null, hexes = null, imgSlot = null;
+
+    if (typeof ev === 'string' && ev.indexOf('|') !== -1) {
+        var parts = ev.replace(/&quot;/g, '"').split('|');
+        for (var pi = 0; pi < parts.length; pi++) {
+            var p = parts[pi];
+            var val = p.indexOf('.') !== -1 ? p.substring(p.indexOf('.') + 1) : '';
+            if (p.charAt(0) === 'p') playing = (val === '1');
+            else if (p.charAt(0) === 'c') {
+                hexes = [];
+                var cs = val.replace(/[^0-9a-fA-F]/g, '');
+                for (var ci = 0; ci + 6 <= cs.length && hexes.length < 5; ci += 6) {
+                    hexes.push(cs.substring(ci, ci + 6));
+                }
+            }
+            else if (p.charAt(0) === 't') title = val.replace(/_/g, ' ');
+            else if (p.charAt(0) === 'i') imgSlot = val;
+        }
+    }
+
+    if (playing === null) { dbg = 'bad evt: ' + String(ev).substring(0, 60); return; }
+    evtCount++;
+    isPaused = !playing;
+
+    var picked = [];
+    if (hexes) {
+        for (var i = 0; i < hexes.length && picked.length < 5; i++) {
+            if (!/^[0-9a-f]{6}$/i.test(hexes[i])) continue;
+            try { picked.push(hexToRgb(hexes[i])); } catch (e) {}
+        }
+    }
+
+    if (picked.length > 0) {
+        // Preserve exact dominance ordering from cover art:
+        // Color 1 = most dominant, Color 2 = 2nd dominant, etc.
+        while (picked.length < 5) picked.push(picked[picked.length - 1]);
+
+        var hexJoined = hexes ? hexes.join('') : '';
+        var isTrackSkip = (lastTitle !== null && title !== lastTitle) ||
+                          (lastHexesString !== null && hexJoined !== lastHexesString);
+
+        lastTitle = title;
+        lastHexesString = hexJoined;
+        targetColors = picked;
+
+        // Reload cover art if a new image slot or track arrived
+        if (imgSlot && imgSlot !== currentSlot) {
+            currentSlot = imgSlot;
+            loadAlbumArt(imgSlot);
+        } else if (isTrackSkip) {
+            loadAlbumArt(currentSlot);
+        }
+
+        // Handle Skip Transition mode triggers (only when track genuinely changes while active)
+        var skipMode = (typeof skipTransition !== 'undefined') ? skipTransition : 'Smooth Blend';
+        if (isTrackSkip && playing) {
+            trackSkipBlend = 1.0;
+            if (skipMode === 'Instant Snap') {
+                currentColors = targetColors.map(function(c) { return { ...c }; });
+            } else if (skipMode === 'Flash Pulse') {
+                flashVal = 1.0;
+            } else if (skipMode === 'Fade Out-In') {
+                fadeVal = 1.0;
+            }
+            // Immediately start a fresh sweep of the new track's primary color
+            sweepEffects = [];
+            sweepColorIdx = -1;
+            var sDir = (typeof sweepDir !== 'undefined') ? sweepDir : 'Side to Side';
+            var spd = (typeof animSpeed !== 'undefined') ? animSpeed : 3;
+            chooseSweepEffect(targetColors, Math.max(4.0, spd * 2.0), sDir);
+        }
+    }
+
+    dbg = (title || '?') + (isPaused ? ' [paused]' : '') + ' [' + (hexes ? hexes.length : 0) + 'c]';
+}
+
+// ------------------------------------------
+//  SIDE TO SIDE SWEEP ENGINE (Official SignalRGB style)
+// ------------------------------------------
+let sweepEffects = [];
+let sweepColorIdx = 0;
+let sweepDirIdx = 0;
+let sweepLastBg = null;
+
+function chooseSweepEffect(pal, sweepSpeed, dirChoice) {
+    if (!pal || pal.length === 0) return;
+    sweepColorIdx = (sweepColorIdx + 1) % pal.length;
+    var col = rgb(pal[sweepColorIdx]);
+    var step = Math.max(1.0, (sweepSpeed || 3) * 1.5);
+    var d = dirChoice || 'Side to Side';
+
+    if (d === 'Side to Side') {
+        sweepDirIdx = sweepDirIdx < 1 ? sweepDirIdx + 1 : 0;
+        sweepEffects.push(new SideSweep(sweepDirIdx, col, step));
+    } else if (d === 'Up and Down') {
+        sweepDirIdx = sweepDirIdx < 1 ? sweepDirIdx + 1 : 0;
+        sweepEffects.push(new VertSweep(sweepDirIdx, col, step));
+    } else {
+        sweepDirIdx = sweepDirIdx < 3 ? sweepDirIdx + 1 : 0;
+        if (sweepDirIdx === 0) sweepEffects.push(new SideSweep(1, col, step));
+        else if (sweepDirIdx === 1) sweepEffects.push(new VertSweep(1, col, step));
+        else if (sweepDirIdx === 2) sweepEffects.push(new SideSweep(0, col, step));
+        else sweepEffects.push(new VertSweep(0, col, step));
+    }
+}
+
+function SideSweep(mod, color, step) {
+    this.x = 320;
+    this.mod = mod;
+    this.color = color;
+    this.lifetime = 1;
+    this.draw = function() {
+        ctx.save();
+        ctx.globalAlpha = 1.0;
+        ctx.translate(160, 100);
+        ctx.scale(1 - this.mod * 2, 1);
+        ctx.translate(-160, -100);
+        ctx.fillStyle = this.color;
+        ctx.fillRect(this.x, 0, 330, 200);
+        ctx.restore();
+        if (this.x > 0) {
+            this.x -= step;
+        } else {
+            this.lifetime = 0;
+            sweepLastBg = this.color;
+        }
+    };
+}
+
+function VertSweep(mod, color, step) {
+    this.y = 200;
+    this.mod = mod;
+    this.color = color;
+    this.lifetime = 1;
+    this.draw = function() {
+        ctx.save();
+        ctx.globalAlpha = 1.0;
+        ctx.translate(160, 100);
+        ctx.scale(1, 1 - this.mod * 2);
+        ctx.translate(-160, -100);
+        ctx.fillStyle = this.color;
+        ctx.fillRect(0, this.y, 320, 210);
+        ctx.restore();
+        if (this.y > 0) {
+            this.y -= step;
+        } else {
+            this.lifetime = 0;
+            sweepLastBg = this.color;
+        }
+    };
+}
+
+// ------------------------------------------
+//  MAIN RENDER LOOP (~60fps)
+// ------------------------------------------
+function render() {
+    // Read SignalRGB controls (with safe fallbacks for browser testing)
+    var spd        = (typeof animSpeed       !== 'undefined') ? animSpeed       : 3;
+    var glow       = (typeof glowSize        !== 'undefined') ? glowSize        : 5;
+    var rawBrt     = (typeof brightness      !== 'undefined') ? Number(brightness) : 80;
+    var brt        = (rawBrt > 10) ? (rawBrt / 100.0) : (rawBrt / 10.0);
+    brt = Math.max(0.0, Math.min(1.0, brt));
+    var showDbg    = (typeof debugHud        !== 'undefined') ? (debugHud === 'On') : false;
+    var skipMode   = (typeof skipTransition  !== 'undefined') ? skipTransition  : 'Smooth Blend';
+    var tSpd       = (typeof transitionSpeed !== 'undefined') ? transitionSpeed : 5;
+    var enableArt  = (typeof useArtwork      !== 'undefined') ? (useArtwork === 'On')      : false;
+    var aMode      = (typeof artMode         !== 'undefined') ? artMode         : 'Fit with Glow';
+    var aBlur      = (typeof artBlur         !== 'undefined') ? artBlur         : 3;
+    var aMotion    = (typeof artMotion       !== 'undefined') ? (artMotion === 'On')        : true;
+    var cStyle     = (typeof colorStyle      !== 'undefined') ? colorStyle      : 'Swirling Aura';
+    var cCount     = (typeof colorCount      !== 'undefined') ? colorCount      : '5 Colors';
+
+    // Parse how many dominant colors to use (1 to 5)
+    var numColors = 5;
+    if (typeof cCount === 'number') {
+        numColors = Math.max(1, Math.min(5, cCount));
+    } else {
+        var m = String(cCount).match(/\d+/);
+        if (m) numColors = parseInt(m[0], 10);
+    }
+    var pal = currentColors.slice(0, numColors);
+    if (pal.length === 0) pal = [currentColors[0]];
+
+    // Advance animation time (slower drift while paused)
+    time += spd * 0.004 * (isPaused ? 0.3 : 1);
+
+    // Calculate dynamic color blend rate based on transitionSpeed
+    var blendRate = (0.01 + (tSpd * 0.01)) * (spd / 3);
+    if (skipMode === 'Instant Snap') {
+        blendRate = 1.0;
+    } else if (trackSkipBlend > 0) {
+        blendRate = Math.max(blendRate, 0.22);
+        trackSkipBlend -= 0.04;
+    }
+    for (var i = 0; i < currentColors.length && i < targetColors.length; i++) {
+        currentColors[i] = lerpColor(currentColors[i], targetColors[i], blendRate);
+    }
+
+    // Smooth pause brightness transition: slight dim (~30% drop by default) when paused
+    var pausePct = (typeof pauseDimLevel !== 'undefined') ? Number(pauseDimLevel) : 70;
+    var targetPauseDim = isPaused ? (Math.max(0, Math.min(100, pausePct)) / 100.0) : 1.0;
+    pauseDimFactor += (targetPauseDim - pauseDimFactor) * 0.05;
+
+    // Reset skip transitions and flare state immediately if paused to eliminate any pause flickering
+    if (isPaused) {
+        flashVal = 0.0;
+        fadeVal = 0.0;
+        bassPulse = 0.0;
+        bassEnergySmooth = 0.0;
+        audioFlare = 0.0;
+    }
+
+    // Effective brightness with pause dim, flash, and fade
+    var effectiveBrt = brt * pauseDimFactor;
+    if (flashVal > 0) {
+        effectiveBrt = Math.min(1.0, effectiveBrt + flashVal * 0.45);
+        flashVal = Math.max(0, flashVal - 0.05 * (spd / 3 + 1));
+    }
+    if (fadeVal > 0) {
+        var dip = Math.sin(fadeVal * Math.PI) * 0.8;
+        effectiveBrt = Math.max(0.1, brt * (1 - dip));
+        fadeVal = Math.max(0, fadeVal - 0.035 * (tSpd / 5 + 0.5));
+    }
+
+    // Audio Bass Reactivity Engine (active strictly only while media is actively playing)
+    var aReact = (typeof audioReactive !== 'undefined') ? audioReactive : 'Bass Beat Pulse';
+    var aGain  = (typeof audioGain !== 'undefined') ? Number(audioGain) : 12;
+    var audioFlare = 0.0;
+    var audioLvlDbg = -100;
+    var rawLevel = -100;
+    var freqData = null;
+
+    if (aReact !== 'Off' && !isPaused && typeof engine !== 'undefined' && engine.audio) {
+        rawLevel = (typeof engine.audio.level === 'number') ? engine.audio.level : -100;
+        freqData = engine.audio.freq;
+        audioLvlDbg = rawLevel;
+
+        // 1. Dynamic Auto-Gain Control (AGC): adapts to whatever volume Windows/Spotify is at
+        if (rawLevel > -95) {
+            if (rawLevel > audioPeak) {
+                audioPeak = rawLevel;
+            } else {
+                audioPeak -= 0.08;
+            }
+            if (rawLevel < audioFloor) {
+                audioFloor = rawLevel;
+            } else {
+                audioFloor += 0.03;
+            }
+        }
+        var dynRange = Math.max(10.0, audioPeak - audioFloor);
+        var normLevel = Math.max(0, Math.min(1.0, (rawLevel - audioFloor) / dynRange));
+
+        // 2. Extract Bass Transient (Sub-bass & Kick frequencies, bands 0-14)
+        var bassMetric = 0;
+        if (Array.isArray(freqData) && freqData.length > 0) {
+            var bSum = 0;
+            var bCount = Math.min(16, freqData.length);
+            for (var bi = 0; bi < bCount; bi++) {
+                var v = freqData[bi];
+                var n = (v < 0) ? Math.max(0, Math.min(1.0, (v + 52.0) / 52.0)) : Math.min(1.0, Math.max(0, v));
+                bSum += n;
+            }
+            bassMetric = bSum / bCount;
+        }
+        if (bassMetric < 0.01 && rawLevel > -90) {
+            bassMetric = normLevel;
+        }
+
+        var scaledBass = Math.min(1.5, Math.max(0, bassMetric * (aGain / 6.0)));
+
+        // 3. Fast-attack, smooth-decay Beat Pulse detector
+        if (scaledBass > bassEnergySmooth + 0.05) {
+            var punch = (scaledBass - bassEnergySmooth) * 3.0;
+            bassPulse = Math.min(1.0, bassPulse + punch);
+        }
+        bassEnergySmooth += (scaledBass - bassEnergySmooth) * 0.18;
+        bassPulse *= 0.86;
+
+        // 4. Mode-specific brightness & contrast modulation
+        if (aReact === 'Heavy Bass Flash') {
+            // High-contrast club strobe: dips to 30% when calm, surges to 100% on kicks
+            var pulseFloor = 0.30;
+            var flareAmount = Math.min(1.0, bassPulse * 0.80 + scaledBass * 0.20);
+            effectiveBrt = effectiveBrt * (pulseFloor + flareAmount * (1.0 - pulseFloor));
+            audioFlare = flareAmount;
+        } else if (aReact === 'Bass Beat Pulse') {
+            // Dynamic pulse: 55% floor, surges to 100% on kicks
+            var pulseFloor = 0.55;
+            var flareAmount = Math.min(1.0, bassPulse * 0.70 + scaledBass * 0.30);
+            effectiveBrt = effectiveBrt * (pulseFloor + flareAmount * (1.0 - pulseFloor));
+            audioFlare = flareAmount;
+        } else if (aReact === 'Audio Speed Surge') {
+            time += bassPulse * 0.05 * (spd || 3);
+            audioFlare = bassPulse * 0.3;
+        } else if (aReact === 'Equalizer Waves') {
+            audioFlare = bassPulse * 0.3;
+        }
+    } else {
+        bassPulse = 0.0;
+        bassEnergySmooth = 0.0;
+        audioFlare = 0.0;
+    }
+
+    // Base background: solid black so LED RGB values composite accurately
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, W, H);
+
+    // =======================================================
+    //  RENDER MODE A: ALBUM ART AS RGB (Screen Ambience Mode)
+    // =======================================================
+    if (enableArt && coverLoaded && coverImg.naturalWidth > 0) {
+        ctx.save();
+        ctx.globalAlpha = effectiveBrt;
+
+        // Note: Ultralight bug causes black screen when blur is 0px, so only apply when > 0
+        try {
+            ctx.filter = (aBlur > 0) ? ('blur(' + aBlur + 'px)') : 'none';
+        } catch(e) {
+            ctx.filter = 'none';
+        }
+
+        if (aMode === 'Pixelate') {
+            // Screen Ambience 28x20 LED zone grid (color boxes matching 560 LED zones)
+            try { ctx.filter = 'none'; } catch(e) {}
+            pCtx.clearRect(0, 0, 28, 20);
+            pCtx.drawImage(coverImg, 0, 0, 28, 20);
+
+            ctx.imageSmoothingEnabled = false;
+            ctx.mozImageSmoothingEnabled = false;
+            ctx.webkitImageSmoothingEnabled = false;
+            ctx.msImageSmoothingEnabled = false;
+            ctx.drawImage(pCanvas, 0, 0, W, H);
+
+            ctx.imageSmoothingEnabled = true;
+            ctx.mozImageSmoothingEnabled = true;
+            ctx.webkitImageSmoothingEnabled = true;
+            ctx.msImageSmoothingEnabled = true;
+        } else if (aMode === 'Stretch Fill') {
+            // Screen Ambience direct stretch
+            ctx.drawImage(coverImg, 0, 0, W, H);
+        } else if (aMode === 'Center Zoom') {
+            // Aspect-fill with gentle motion
+            var scale = Math.max(W / coverImg.naturalWidth, H / coverImg.naturalHeight);
+            if (aMotion) scale *= (1.0 + Math.sin(time * 0.4) * 0.025);
+            var dw = coverImg.naturalWidth * scale;
+            var dh = coverImg.naturalHeight * scale;
+            var dx = (W - dw) / 2;
+            var dy = (H - dh) / 2;
+            ctx.drawImage(coverImg, dx, dy, dw, dh);
+        } else {
+            // Fit with Glow (Default):
+            // 1. Blurred background covers entire canvas (no unlit LEDs on outer fans/mouse)
+            ctx.drawImage(coverImg, 0, 0, W, H);
+
+            // 2. Centered album art with crisp edges
+            try { ctx.filter = 'none'; } catch(e) {}
+            var aspect = coverImg.naturalWidth / coverImg.naturalHeight;
+            var ch = H * 0.94;
+            var cw = ch * aspect;
+            var cx = (W - cw) / 2;
+            var cy = (H - ch) / 2;
+            if (aMotion) {
+                cx += Math.sin(time * 0.5) * 5;
+                cy += Math.cos(time * 0.35) * 3;
+            }
+            ctx.drawImage(coverImg, cx, cy, cw, ch);
+        }
+
+        // Additive subtle ambient pulse matching palette
+        var glowRadius = 40 + glow * 10;
+        ctx.globalCompositeOperation = 'screen';
+        for (var gi = 0; gi < 2; gi++) {
+            var gcx = W / 2 + Math.sin(time * 0.5 + gi * 2.2) * W * 0.35;
+            var gcy = H / 2 + Math.cos(time * 0.4 + gi * 2.5) * H * 0.25;
+            var radG = ctx.createRadialGradient(gcx, gcy, 0, gcx, gcy, glowRadius);
+            var col = currentColors[(gi * 2) % currentColors.length];
+            radG.addColorStop(0, rgba(col, 0.25));
+            radG.addColorStop(1, rgba(col, 0));
+            ctx.fillStyle = radG;
+            ctx.fillRect(0, 0, W, H);
+        }
+        ctx.restore();
+
+    } else {
+        // =======================================================
+        //  RENDER MODE B: DYNAMIC DOMINANT COLOR ANIMATIONS
+        // =======================================================
+
+        if (cStyle === 'Side to Side') {
+            // Official SignalRGB Side to Side sweep with media palette
+            var sDir = (typeof sweepDir !== 'undefined') ? sweepDir : 'Side to Side';
+            if (!sweepLastBg) sweepLastBg = rgb(pal[0]);
+            ctx.fillStyle = sweepLastBg;
+            ctx.fillRect(0, 0, W, H);
+
+            if (sweepEffects.length < 1) {
+                chooseSweepEffect(pal, spd, sDir);
+            }
+
+            for (var se = 0; se < sweepEffects.length; se++) {
+                sweepEffects[se].draw(effectiveBrt);
+            }
+            sweepEffects = sweepEffects.filter(function(e) { return e.lifetime > 0; });
+
+        } else if (cStyle === 'Duo-Tone Contrast') {
+            // High-contrast two-tone split across devices (e.g. keyboard left vs right / fans vs strips)
+            var c1 = pal[0];
+            var c2 = pal.length > 1 ? pal[1] : pal[0];
+
+            // If the two colors are too close in tone, synthesize an electric complementary contrast
+            var rDiff = Math.abs(c1.r - c2.r);
+            var gDiff = Math.abs(c1.g - c2.g);
+            var bDiff = Math.abs(c1.b - c2.b);
+            if (rDiff + gDiff + bDiff < 60) {
+                c2 = {
+                    r: Math.min(255, Math.max(0, 255 - c1.r)),
+                    g: Math.min(255, Math.max(0, Math.round(c1.g * 0.7))),
+                    b: Math.min(255, Math.max(0, 255 - c1.b))
+                };
+            }
+
+            var splitOffset = Math.sin(time * 0.4) * 0.15;
+            var gradDT = ctx.createLinearGradient(0, 0, W, H);
+            gradDT.addColorStop(0, rgb(c1));
+            gradDT.addColorStop(Math.max(0, Math.min(1, 0.45 + splitOffset)), rgb(c1));
+            gradDT.addColorStop(Math.max(0, Math.min(1, 0.55 + splitOffset)), rgb(c2));
+            gradDT.addColorStop(1, rgb(c2));
+
+            ctx.globalAlpha = effectiveBrt;
+            ctx.fillStyle = gradDT;
+            ctx.fillRect(0, 0, W, H);
+
+            // Shimmer beam drifting across the boundary
+            var shimX = (W / 2) + Math.sin(time * 0.7) * (W * 0.35);
+            var radShim = ctx.createRadialGradient(shimX, H / 2, 0, shimX, H / 2, 80);
+            radShim.addColorStop(0, rgba(c2, 0.35));
+            radShim.addColorStop(1, rgba(c2, 0));
+            ctx.globalCompositeOperation = 'screen';
+            ctx.fillStyle = radShim;
+            ctx.fillRect(0, 0, W, H);
+            ctx.globalCompositeOperation = 'source-over';
+
+        } else if (cStyle === 'Horizontal Wave') {
+            // Smooth horizontal wave traveling across devices (keyboard -> mouse -> fans)
+            var waveX = (time * 0.25) % 1.0;
+            var gradH = ctx.createLinearGradient(-W * waveX, 0, W * (2 - waveX), 0);
+            if (pal.length === 1) {
+                gradH.addColorStop(0.0, rgb(pal[0]));
+                gradH.addColorStop(0.25, rgba(pal[0], 0.35));
+                gradH.addColorStop(0.5, rgb(pal[0]));
+                gradH.addColorStop(0.75, rgba(pal[0], 0.35));
+                gradH.addColorStop(1.0, rgb(pal[0]));
+            } else {
+                for (var loopH = 0; loopH < 2; loopH++) {
+                    for (var hi = 0; hi < pal.length; hi++) {
+                        var stopH = (loopH * pal.length + hi) / (2 * pal.length - 1);
+                        gradH.addColorStop(stopH, rgb(pal[hi]));
+                    }
+                }
+            }
+            ctx.globalAlpha = effectiveBrt;
+            ctx.fillStyle = gradH;
+            ctx.fillRect(0, 0, W, H);
+
+            // Subtle travelling glow highlight
+            var waveGlow = ctx.createRadialGradient(W * ((waveX + 0.5) % 1.0), H / 2, 0, W * ((waveX + 0.5) % 1.0), H / 2, W * 0.45);
+            waveGlow.addColorStop(0, rgba(pal[0], 0.25));
+            waveGlow.addColorStop(1, rgba(pal[0], 0));
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.fillStyle = waveGlow;
+            ctx.fillRect(0, 0, W, H);
+
+        } else if (cStyle === 'Vertical Wave') {
+            // Smooth vertical wave (top to bottom across PC case / fan stacks)
+            var waveY = (time * 0.25) % 1.0;
+            var gradV = ctx.createLinearGradient(0, -H * waveY, 0, H * (2 - waveY));
+            if (pal.length === 1) {
+                gradV.addColorStop(0.0, rgb(pal[0]));
+                gradV.addColorStop(0.25, rgba(pal[0], 0.35));
+                gradV.addColorStop(0.5, rgb(pal[0]));
+                gradV.addColorStop(0.75, rgba(pal[0], 0.35));
+                gradV.addColorStop(1.0, rgb(pal[0]));
+            } else {
+                for (var loopV = 0; loopV < 2; loopV++) {
+                    for (var vi = 0; vi < pal.length; vi++) {
+                        var stopV = (loopV * pal.length + vi) / (2 * pal.length - 1);
+                        gradV.addColorStop(stopV, rgb(pal[vi]));
+                    }
+                }
+            }
+            ctx.globalAlpha = effectiveBrt;
+            ctx.fillStyle = gradV;
+            ctx.fillRect(0, 0, W, H);
+
+        } else if (cStyle === 'Breathing Pulse') {
+            // Rhythmic breathing swell without rotation
+            var breath = (Math.sin(time * 0.6) + 1.0) * 0.5; // 0.0 to 1.0
+            var pulseAlpha = effectiveBrt * (0.35 + breath * 0.65);
+            ctx.globalAlpha = pulseAlpha;
+
+            if (pal.length === 1) {
+                ctx.fillStyle = rgb(pal[0]);
+                ctx.fillRect(0, 0, W, H);
+            } else {
+                // Dominant color #1 radiates from center, other colors bloom outward
+                var radPulse = ctx.createRadialGradient(W / 2, H / 2, 10 + breath * 20, W / 2, H / 2, W * 0.6 + breath * 35);
+                for (var bi = 0; bi < pal.length; bi++) {
+                    radPulse.addColorStop(bi / (pal.length - 1), rgb(pal[bi]));
+                }
+                ctx.fillStyle = radPulse;
+                ctx.fillRect(0, 0, W, H);
+            }
+
+        } else if (cStyle === 'Static Gradient') {
+            // Clean, stationary smooth gradient with zero spinning
+            ctx.globalAlpha = effectiveBrt;
+            if (pal.length === 1) {
+                ctx.fillStyle = rgb(pal[0]);
+                ctx.fillRect(0, 0, W, H);
+            } else {
+                var gradS = ctx.createLinearGradient(0, 0, W, 0);
+                for (var si = 0; si < pal.length; si++) {
+                    gradS.addColorStop(si / (pal.length - 1), rgb(pal[si]));
+                }
+                ctx.fillStyle = gradS;
+                ctx.fillRect(0, 0, W, H);
+            }
+
+        } else if (cStyle === 'Linear Drift') {
+            // Gentle continuous diagonal drift (no rotation)
+            var drift = (time * 0.15) % 1.0;
+            var dOffX = W * drift;
+            var dOffY = H * drift;
+            var gradD = ctx.createLinearGradient(dOffX - W, dOffY - H, dOffX + W, dOffY + H);
+            if (pal.length === 1) {
+                gradD.addColorStop(0.0, rgb(pal[0]));
+                gradD.addColorStop(0.5, rgba(pal[0], 0.5));
+                gradD.addColorStop(1.0, rgb(pal[0]));
+            } else {
+                for (var di = 0; di < pal.length; di++) {
+                    gradD.addColorStop(di / (pal.length - 1), rgb(pal[di]));
+                }
+            }
+            ctx.globalAlpha = effectiveBrt;
+            ctx.fillStyle = gradD;
+            ctx.fillRect(0, 0, W, H);
+
+        } else {
+            // Default: Swirling Aura (rotating gradient + orbiting glow orbs)
+            var angle = time * 0.25;
+            var x1 = W / 2 + Math.cos(angle) * W * 0.7;
+            var y1 = H / 2 + Math.sin(angle) * H * 0.5;
+            var x2 = W / 2 + Math.cos(angle + Math.PI) * W * 0.7;
+            var y2 = H / 2 + Math.sin(angle + Math.PI) * H * 0.5;
+
+            var gradAura = ctx.createLinearGradient(x1, y1, x2, y2);
+            if (pal.length === 1) {
+                gradAura.addColorStop(0.0, rgb(pal[0]));
+                gradAura.addColorStop(1.0, rgba(pal[0], 0.6));
+            } else {
+                for (var pi = 0; pi < pal.length; pi++) {
+                    gradAura.addColorStop(pi / (pal.length - 1), rgb(pal[pi]));
+                }
+            }
+
+            ctx.globalAlpha = effectiveBrt;
+            ctx.fillStyle = gradAura;
+            ctx.fillRect(0, 0, W, H);
+
+            // Orbiting radial glows (source-over preserves each color's identity)
+            var glowRadius2 = 40 + glow * 12;
+            ctx.globalCompositeOperation = 'source-over';
+            for (var k = 0; k < Math.min(4, pal.length); k++) {
+                var cx2 = W / 2 + Math.sin(time * 0.6 + k * 1.8) * W * 0.35;
+                var cy2 = H / 2 + Math.cos(time * 0.4 + k * 2.3) * H * 0.3;
+                var r2 = glowRadius2 + Math.sin(time * 0.8 + k * 1.1) * 25;
+                var c2 = pal[k % pal.length];
+
+                var radGrad2 = ctx.createRadialGradient(cx2, cy2, 0, cx2, cy2, r2);
+                radGrad2.addColorStop(0, rgba(c2, 0.45));
+                radGrad2.addColorStop(0.7, rgba(c2, 0.1));
+                radGrad2.addColorStop(1, rgba(c2, 0));
+
+                ctx.globalAlpha = effectiveBrt * 0.6;
+                ctx.fillStyle = radGrad2;
+                ctx.fillRect(0, 0, W, H);
+            }
+        }
+
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = 1.0;
+    }
+
+    // === AUDIO REACTIVE EQUALIZER WAVES ===
+    if (aReact === 'Equalizer Waves' && !isPaused && freqData && Array.isArray(freqData) && freqData.length > 0) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        var barCount = Math.min(20, freqData.length);
+        var barW = W / barCount;
+        for (var b = 0; b < barCount; b++) {
+            var val = freqData[b];
+            var nVal = (val < 0) ? Math.max(0, Math.min(1.0, (val + 52.0) / 52.0)) : Math.min(1.0, Math.max(0, val));
+            var barH = nVal * (H * 0.70) * (aGain / 10.0);
+            if (barH > 2) {
+                var c = pal[b % pal.length];
+                ctx.fillStyle = rgba(c, 0.55);
+                ctx.fillRect(b * barW + 1, H - barH, barW - 2, barH);
+            }
+        }
+        ctx.restore();
+    }
+
+    // === AUDIO BEAT RADIAL FLARE ===
+    if (aReact !== 'Off' && !isPaused && bassPulse > 0.08) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        var flareR = 60 + bassPulse * 160;
+        var flareGrad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, flareR);
+        var flareCol = pal[0] || currentColors[0];
+        flareGrad.addColorStop(0, rgba(flareCol, bassPulse * 0.55));
+        flareGrad.addColorStop(0.5, rgba(flareCol, bassPulse * 0.20));
+        flareGrad.addColorStop(1, rgba(flareCol, 0));
+        ctx.fillStyle = flareGrad;
+        ctx.fillRect(0, 0, W, H);
+        ctx.restore();
+    }
+
+    // === MASTER BRIGHTNESS DIMMER OVERLAY ===
+    // Directly dims RGB values so SignalRGB LEDs visibly scale with brightness
+    if (effectiveBrt < 0.999) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = 'rgba(0, 0, 0, ' + Math.max(0, Math.min(1, 1.0 - effectiveBrt)) + ')';
+        ctx.fillRect(0, 0, W, H);
+        ctx.restore();
+    }
+
+    // === DEBUG HUD ===
+    if (showDbg) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(0,0,0,0.88)';
+        ctx.fillRect(0, 0, W, 48);
+        ctx.fillStyle = '#fff';
+        ctx.font = '10px monospace';
+        var artStatus = enableArt ? (coverLoaded ? 'ART:ON' : 'ART:LOADING') : 'ART:OFF';
+        var audioStr = (aReact === 'Off') ? 'AUDIO:OFF' : ('AUDIO:' + aReact + ' [' + audioLvlDbg.toFixed(0) + 'dB, P:' + Math.round(bassPulse * 100) + '%]');
+        ctx.fillText('EVT:' + evtCount + ' | ' + dbg + ' | ' + audioStr, 4, 11);
+        ctx.fillText(artStatus + ' | ' + coverSource + ' (' + coverStatus + ') | BRT:' + Math.round(effectiveBrt * 100) + '%', 4, 23);
+        ctx.fillText('dom:', 4, 37);
+        for (var d = 0; d < pal.length; d++) {
+            ctx.fillStyle = rgb(pal[d]);
+            ctx.fillRect(32 + d * 26, 28, 22, 14);
+            ctx.fillStyle = luma(pal[d]) > 120 ? '#000' : '#fff';
+            ctx.font = 'bold 9px monospace';
+            ctx.fillText(String(d + 1), 40 + d * 26, 39);
+        }
+        ctx.restore();
+    }
+
+    window.requestAnimationFrame(render);
+}
+
+// ------------------------------------------
+//  START
+// ------------------------------------------
+window.requestAnimationFrame(render);
+
+</script>
+</body>
+</html>

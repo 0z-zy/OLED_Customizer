@@ -108,6 +108,10 @@ class DisplayManager:
         self._smtc_broadcast_server = None
         self._check_smtc_broadcast_server()
 
+        # SignalRGB local canvas-event pusher (outbound only, 127.0.0.1)
+        self._signalrgb_pusher = None
+        self._check_signalrgb_pusher()
+
         # Discord RPC — polls Discord's local IPC for mic mute/deaf state
         discord_cid = self.user_preferences.get_preference("discord_client_id") or None
         self._discord_ipc = DiscordIPC(
@@ -732,6 +736,7 @@ class DisplayManager:
 
         self._spotify_poll_ms = max(250, int(self.fetch_delay * 1000))
         self._check_smtc_broadcast_server()
+        self._check_signalrgb_pusher()
         
         # Reload Spotify credentials if they changed (only if Spotify is enabled)
         if hasattr(self, "spotify_api") and self.spotify_api:
@@ -770,6 +775,29 @@ class DisplayManager:
             if self._smtc_broadcast_server:
                 self._smtc_broadcast_server.stop()
                 self._smtc_broadcast_server = None
+
+    def _check_signalrgb_pusher(self):
+        enabled = bool(self.user_preferences.get_preference("signalrgb_push_enabled"))
+        port = int(self.user_preferences.get_preference("signalrgb_push_port") or 16034)
+        if not (1 <= port <= 65535):
+            port = 16034
+        sender = (self.user_preferences.get_preference("signalrgb_push_sender") or "").strip() or "OLED Customizer"
+        include_title = bool(self.user_preferences.get_preference("signalrgb_push_include_title"))
+
+        current = getattr(self, "_signalrgb_pusher", None)  # getattr guard: tray is live from ~line 57
+        if not enabled:
+            if current:
+                current.stop()
+                self._signalrgb_pusher = None
+            return
+
+        if (current is None or current.port != port or current.sender != sender
+                or current.include_title != include_title):
+            if current:
+                current.stop()
+            from src.SignalRGBPusher import SignalRGBPusher   # lazy import, mirrors line 766
+            self._signalrgb_pusher = SignalRGBPusher(port=port, sender=sender, include_title=include_title)
+            self._signalrgb_pusher.start()
 
     def init(self):
         # Startup: Only attempt Spotify auth if enabled
@@ -1246,6 +1274,14 @@ class DisplayManager:
                 pass
             self._smtc_broadcast_server = None
 
+        # Stop SignalRGB Pusher
+        if hasattr(self, "_signalrgb_pusher") and self._signalrgb_pusher:
+            try:
+                self._signalrgb_pusher.stop()
+            except Exception:
+                pass
+            self._signalrgb_pusher = None
+
         # Close Discord IPC connection
         if hasattr(self, "_discord_ipc"):
             try:
@@ -1309,7 +1345,7 @@ class DisplayManager:
                 except Exception as e:
                     logger.debug(f"SMTC poll error: {e}")
                 
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.1)
 
         # Keep restarting the loop if it crashes (SMTC/WinRT can be unstable)
         while self._running:

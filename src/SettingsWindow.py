@@ -338,6 +338,10 @@ class SettingsGUI:
         self.vars["debug_enabled"] = tk.BooleanVar(value=bool(self.prefs.get_preference("debug_enabled")))
         self.vars["smtc_broadcast_enabled"] = tk.BooleanVar(value=bool(self.prefs.get_preference("smtc_broadcast_enabled")))
         self.vars["smtc_broadcast_port"] = tk.StringVar(value=str(self.prefs.get_preference("smtc_broadcast_port") or "1231"))
+        self.vars["signalrgb_push_enabled"] = tk.BooleanVar(value=bool(self.prefs.get_preference("signalrgb_push_enabled")))
+        self.vars["signalrgb_push_port"] = tk.StringVar(value=str(self.prefs.get_preference("signalrgb_push_port") or "16034"))
+        self.vars["signalrgb_push_sender"] = tk.StringVar(value=self.prefs.get_preference("signalrgb_push_sender") or "OLED Customizer")
+        self.vars["signalrgb_push_include_title"] = tk.BooleanVar(value=bool(self.prefs.get_preference("signalrgb_push_include_title")))
 
     def _create_pages(self):
         # General
@@ -424,6 +428,12 @@ class SettingsGUI:
         self._header(p_adv, "📡 SMTC Media Broadcast")
         self._toggle_row(p_adv, "Enable Broadcast (SignalRGB / Web)", self.vars["smtc_broadcast_enabled"])
         self._entry_row(p_adv, "Broadcast Port", self.vars["smtc_broadcast_port"], width=10)
+        tk.Frame(p_adv, bg=Colors.CONTENT, height=10).pack()
+        self._header(p_adv, "🎨 SignalRGB Media Push (local only)")
+        self._toggle_row(p_adv, "Push Media Colors to SignalRGB", self.vars["signalrgb_push_enabled"])
+        self._entry_row(p_adv, "Push Port", self.vars["signalrgb_push_port"], width=10)
+        self._entry_row(p_adv, "Sender Name", self.vars["signalrgb_push_sender"], width=25)
+        self._toggle_row(p_adv, "Include Track Title", self.vars["signalrgb_push_include_title"])
         self.pages["Advanced"] = p_adv
 
         # Backups
@@ -613,7 +623,7 @@ class SettingsGUI:
                     val = self.DROPDOWN_MAPS[k].get(val, val)
 
                 # Integer fields
-                if k in ["scrollbar_padding", "text_padding_left", "local_port", "discord_local_port", "smtc_broadcast_port", "spotify_fetch_delay", "hw_polling_interval"]:
+                if k in ["scrollbar_padding", "text_padding_left", "local_port", "discord_local_port", "smtc_broadcast_port", "signalrgb_push_port", "spotify_fetch_delay", "hw_polling_interval"]:
                     try: val = int(val)
                     except: val = UserPreferences.DEFAULT.get(k, 0)
                 

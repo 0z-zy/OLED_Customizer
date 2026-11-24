@@ -28,6 +28,7 @@ OLED Customizer transforms your keyboard's small screen into a powerful, high-co
 - **Spotify & YouTube Support**: Real-time integration with Spotify (via API) and Windows media (via SMTC).
 - **Intelligent Switching**: Seamlessly transitions between music info and the clock.
 - **Pixel-Perfect Icons**: Custom YouTube and Media icons designed specifically for the 128x40 display.
+- **SignalRGB Ambient Push**: Play state + 5 album-art colors pushed to SignalRGB's local canvas API (127.0.0.1 only, off by default).
 
 | Spotify | YouTube | Generic Media |
 | :---: | :---: | :---: |
