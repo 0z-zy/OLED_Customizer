@@ -98,6 +98,91 @@ impl TtfFontId {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PixelAccent {
+    Acute,
+    Grave,
+    Circumflex,
+    Umlaut,
+    Tilde,
+    Breve,
+    DotAbove,
+    Slash,
+    Cedilla,
+}
+
+fn precomposed_accent(ch: char) -> Option<PixelAccent> {
+    match ch {
+        'á' | 'Á' | 'é' | 'É' | 'í' | 'Í' | 'ó' | 'Ó' | 'ú' | 'Ú' | 'ý' | 'Ý' | 'ć' | 'Ć'
+        | 'ń' | 'Ń' | 'ŕ' | 'Ŕ' | 'ś' | 'Ś' | 'ź' | 'Ź' | 'ĺ' | 'Ĺ' => {
+            Some(PixelAccent::Acute)
+        }
+        'à' | 'À' | 'è' | 'È' | 'ì' | 'Ì' | 'ò' | 'Ò' | 'ù' | 'Ù' => Some(PixelAccent::Grave),
+        'â' | 'Â' | 'ê' | 'Ê' | 'î' | 'Î' | 'ô' | 'Ô' | 'û' | 'Û' | 'ĉ' | 'Ĉ' | 'ĝ' | 'Ĝ'
+        | 'ĥ' | 'Ĥ' | 'ĵ' | 'Ĵ' | 'ŝ' | 'Ŝ' | 'ŵ' | 'Ŵ' | 'ŷ' | 'Ŷ' => {
+            Some(PixelAccent::Circumflex)
+        }
+        'ä' | 'Ä' | 'ë' | 'Ë' | 'ï' | 'Ï' | 'ö' | 'Ö' | 'ü' | 'Ü' | 'ÿ' | 'Ÿ' => {
+            Some(PixelAccent::Umlaut)
+        }
+        'ã' | 'Ã' | 'ñ' | 'Ñ' | 'õ' | 'Õ' | 'ĩ' | 'Ĩ' | 'ũ' | 'Ũ' => Some(PixelAccent::Tilde),
+        'ğ' | 'Ğ' | 'ă' | 'Ă' | 'ĕ' | 'Ĕ' | 'ĭ' | 'Ĭ' | 'ŏ' | 'Ŏ' | 'ŭ' | 'Ŭ' | 'č' | 'Č'
+        | 'ď' | 'Ď' | 'ě' | 'Ě' | 'ň' | 'Ň' | 'ř' | 'Ř' | 'š' | 'Š' | 'ť' | 'Ť' | 'ž' | 'Ž' => {
+            Some(PixelAccent::Breve)
+        }
+        'İ' | 'å' | 'Å' | 'ċ' | 'Ċ' | 'ġ' | 'Ġ' | 'ż' | 'Ż' => Some(PixelAccent::DotAbove),
+        'ø' | 'Ø' | 'ł' | 'Ł' | 'đ' | 'Đ' => Some(PixelAccent::Slash),
+        'ş' | 'Ş' | 'ç' | 'Ç' => Some(PixelAccent::Cedilla),
+        _ => None,
+    }
+}
+
+fn combining_accent(ch: char) -> Option<PixelAccent> {
+    match ch {
+        '\u{0301}' => Some(PixelAccent::Acute),
+        '\u{0300}' => Some(PixelAccent::Grave),
+        '\u{0302}' => Some(PixelAccent::Circumflex),
+        '\u{0308}' => Some(PixelAccent::Umlaut),
+        '\u{0303}' => Some(PixelAccent::Tilde),
+        '\u{0306}' | '\u{030C}' => Some(PixelAccent::Breve),
+        '\u{0307}' | '\u{030A}' => Some(PixelAccent::DotAbove),
+        '\u{0327}' => Some(PixelAccent::Cedilla),
+        _ => None,
+    }
+}
+
+fn extract_munro_accents(text: &str) -> Vec<(usize, PixelAccent)> {
+    let mut out = Vec::new();
+    let mut norm_idx = 0usize;
+    let mut last_idx: Option<usize> = None;
+
+    for ch in text.chars() {
+        if let Some(acc) = combining_accent(ch) {
+            if let Some(idx) = last_idx {
+                out.push((idx, acc));
+            }
+            continue;
+        }
+        if matches!(ch, '\u{0300}'..='\u{036F}' | '\u{200B}'..='\u{200F}' | '\u{FEFF}') {
+            continue;
+        }
+        let prev_len = norm_idx;
+        let single = [ch];
+        let s: String = single.iter().collect();
+        let mapped = normalize_text(&s);
+        let added = mapped.encode_utf16().count();
+        if added > 0 {
+            if let Some(acc) = precomposed_accent(ch) {
+                out.push((prev_len, acc));
+            }
+            last_idx = Some(prev_len);
+            norm_idx += added;
+        } else {
+            last_idx = None;
+        }
+    }
+    out
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AlignH {
     Left,
     Center,
@@ -230,6 +315,77 @@ impl GdiFontBank {
                     }
                 }
             }
+
+            if id == TtfFontId::Munro10 {
+                let accents = extract_munro_accents(text);
+                if !accents.is_empty() {
+                    let ink_y = top_y + id.ink_top_offset();
+                    for (utf16_idx, acc) in accents {
+                        if utf16_idx >= wide.len() {
+                            continue;
+                        }
+                        let prefix_w = if utf16_idx == 0 {
+                            0
+                        } else {
+                            let mut sz = SIZE::default();
+                            let _ = GetTextExtentPoint32W(self.hdc, &wide[..utf16_idx], &mut sz);
+                            sz.cx
+                        };
+                        let mut csz = SIZE::default();
+                        let _ = GetTextExtentPoint32W(
+                            self.hdc,
+                            &wide[utf16_idx..utf16_idx + 1],
+                            &mut csz,
+                        );
+                        let cx = x + prefix_w;
+                        let gw = (csz.cx - 1).max(3);
+                        let mid = cx + gw / 2;
+
+                        match acc {
+                            PixelAccent::Acute => {
+                                canvas.set_pixel_clipped(mid + 1, ink_y - 2, on, clip);
+                                canvas.set_pixel_clipped(mid, ink_y - 1, on, clip);
+                            }
+                            PixelAccent::Grave => {
+                                canvas.set_pixel_clipped(mid - 1, ink_y - 2, on, clip);
+                                canvas.set_pixel_clipped(mid, ink_y - 1, on, clip);
+                            }
+                            PixelAccent::Circumflex => {
+                                canvas.set_pixel_clipped(mid, ink_y - 2, on, clip);
+                                canvas.set_pixel_clipped(mid - 1, ink_y - 1, on, clip);
+                                canvas.set_pixel_clipped(mid + 1, ink_y - 1, on, clip);
+                            }
+                            PixelAccent::Umlaut => {
+                                canvas.set_pixel_clipped(mid - 1, ink_y - 2, on, clip);
+                                canvas.set_pixel_clipped(mid + 1, ink_y - 2, on, clip);
+                            }
+                            PixelAccent::Tilde => {
+                                canvas.set_pixel_clipped(mid - 1, ink_y - 2, on, clip);
+                                canvas.set_pixel_clipped(mid, ink_y - 2, on, clip);
+                                canvas.set_pixel_clipped(mid + 1, ink_y - 1, on, clip);
+                            }
+                            PixelAccent::Breve => {
+                                canvas.set_pixel_clipped(mid - 1, ink_y - 2, on, clip);
+                                canvas.set_pixel_clipped(mid, ink_y - 1, on, clip);
+                                canvas.set_pixel_clipped(mid + 1, ink_y - 2, on, clip);
+                            }
+                            PixelAccent::DotAbove => {
+                                canvas.set_pixel_clipped(mid, ink_y - 2, on, clip);
+                            }
+                            PixelAccent::Slash => {
+                                let top_x = cx + (gw - 1).min(4);
+                                for i in 0..5 {
+                                    canvas.set_pixel_clipped(top_x - i, ink_y + i, on, clip);
+                                }
+                            }
+                            PixelAccent::Cedilla => {
+                                canvas.set_pixel_clipped(mid, ink_y + 5, on, clip);
+                                canvas.set_pixel_clipped(mid - 1, ink_y + 6, on, clip);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -243,20 +399,64 @@ pub fn normalize_text(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
         match ch {
-            'ş' => out.push('s'),
-            'Ş' => out.push('S'),
-            'ç' => out.push('c'),
-            'Ç' => out.push('C'),
-            'ü' => out.push('u'),
-            'Ü' => out.push('U'),
-            'ö' => out.push('o'),
-            'Ö' => out.push('O'),
-            'ğ' => out.push('g'),
-            'Ğ' => out.push('G'),
-            'ı' => out.push('i'),
-            'İ' => out.push('I'),
-            '—' | '–' => out.push('-'),
-            _ => out.push(ch),
+            // Combining diacritics & zero-width formatting chars: drop cleanly
+            '\u{0300}'..='\u{036F}' | '\u{200B}'..='\u{200F}' | '\u{FEFF}' => {}
+
+            // Turkish & common Latin-1 / Extended-A accented letters
+            'á' | 'à' | 'â' | 'ä' | 'ã' | 'å' | 'ā' | 'ă' | 'ą' => out.push('a'),
+            'Á' | 'À' | 'Â' | 'Ä' | 'Ã' | 'Å' | 'Ā' | 'Ă' | 'Ą' => out.push('A'),
+            'ç' | 'ć' | 'č' | 'ĉ' | 'ċ' => out.push('c'),
+            'Ç' | 'Ć' | 'Č' | 'Ĉ' | 'Ċ' => out.push('C'),
+            'ď' | 'đ' | 'ð' => out.push('d'),
+            'Ď' | 'Đ' | 'Ð' => out.push('D'),
+            'é' | 'è' | 'ê' | 'ë' | 'ē' | 'ĕ' | 'ė' | 'ę' | 'ě' => out.push('e'),
+            'É' | 'È' | 'Ê' | 'Ë' | 'Ē' | 'Ĕ' | 'Ė' | 'Ę' | 'Ě' => out.push('E'),
+            'ğ' | 'ĝ' | 'ġ' | 'ģ' => out.push('g'),
+            'Ğ' | 'Ĝ' | 'Ġ' | 'Ģ' => out.push('G'),
+            'ĥ' | 'ħ' => out.push('h'),
+            'Ĥ' | 'Ħ' => out.push('H'),
+            'í' | 'ì' | 'î' | 'ï' | 'ı' | 'ĩ' | 'ī' | 'ĭ' | 'į' => out.push('i'),
+            'Í' | 'Ì' | 'Î' | 'Ï' | 'İ' | 'Ĩ' | 'Ī' | 'Ĭ' | 'Į' => out.push('I'),
+            'ĵ' => out.push('j'),
+            'Ĵ' => out.push('J'),
+            'ķ' => out.push('k'),
+            'Ķ' => out.push('K'),
+            'ĺ' | 'ļ' | 'ľ' | 'ł' => out.push('l'),
+            'Ĺ' | 'Ļ' | 'Ľ' | 'Ł' => out.push('L'),
+            'ñ' | 'ń' | 'ņ' | 'ň' => out.push('n'),
+            'Ñ' | 'Ń' | 'Ņ' | 'Ň' => out.push('N'),
+            'ó' | 'ò' | 'ô' | 'ö' | 'õ' | 'ø' | 'ō' | 'ŏ' | 'ő' => out.push('o'),
+            'Ó' | 'Ò' | 'Ô' | 'Ö' | 'Õ' | 'Ø' | 'Ō' | 'Ŏ' | 'Ő' => out.push('O'),
+            'ŕ' | 'ŗ' | 'ř' => out.push('r'),
+            'Ŕ' | 'Ŗ' | 'Ř' => out.push('R'),
+            'ş' | 'ś' | 'ŝ' | 'š' => out.push('s'),
+            'Ş' | 'Ś' | 'Ŝ' | 'Š' => out.push('S'),
+            'ţ' | 'ť' | 'ŧ' => out.push('t'),
+            'Ţ' | 'Ť' | 'Ŧ' => out.push('T'),
+            'ú' | 'ù' | 'û' | 'ü' | 'ũ' | 'ū' | 'ŭ' | 'ů' | 'ű' | 'ų' => out.push('u'),
+            'Ú' | 'Ù' | 'Û' | 'Ü' | 'Ũ' | 'Ū' | 'Ŭ' | 'Ů' | 'Ű' | 'Ų' => out.push('U'),
+            'ŵ' => out.push('w'),
+            'Ŵ' => out.push('W'),
+            'ý' | 'ÿ' | 'ŷ' => out.push('y'),
+            'Ý' | 'Ÿ' | 'Ŷ' => out.push('Y'),
+            'ź' | 'ż' | 'ž' => out.push('z'),
+            'Ź' | 'Ż' | 'Ž' => out.push('Z'),
+            'æ' => out.push_str("ae"),
+            'Æ' => out.push_str("AE"),
+            'œ' => out.push_str("oe"),
+            'Œ' => out.push_str("OE"),
+            'ß' => out.push_str("ss"),
+
+            // Punctuation & symbols missing from MunroSmall.ttf
+            '—' | '–' | '−' | '·' | '•' => out.push('-'),
+            '`' | '‘' | '’' | '‚' | '´' => out.push('\''),
+            '“' | '”' | '„' => out.push('"'),
+            '…' => out.push_str("..."),
+            '×' => out.push('x'),
+            '°' | ' ' => out.push(ch),
+            '\u{00A0}' => out.push(' '),
+            '!'..='~' => out.push(ch),
+            _ => {}
         }
     }
     out
@@ -297,4 +497,29 @@ pub fn draw_font(
     on: bool,
 ) {
     draw_font_clipped(canvas, id, x, ink_top_y, text, align, on, Rect::full());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{extract_munro_accents, normalize_text, PixelAccent};
+
+    #[test]
+    fn normalizes_accented_and_unsupported_chars() {
+        assert_eq!(normalize_text("LÉON"), "LEON");
+        assert_eq!(normalize_text("LE\u{0301}ON"), "LEON");
+        assert_eq!(normalize_text("LØN — Café"), "LON - Cafe");
+        assert_eq!(normalize_text("56° 🔥"), "56° ");
+        assert_eq!(
+            extract_munro_accents("LÉON"),
+            vec![(1, PixelAccent::Acute)]
+        );
+        assert_eq!(
+            extract_munro_accents("LE\u{0301}ON"),
+            vec![(1, PixelAccent::Acute)]
+        );
+        assert_eq!(
+            extract_munro_accents("MØ - Şebnem"),
+            vec![(1, PixelAccent::Slash), (5, PixelAccent::Cedilla)]
+        );
+    }
 }
