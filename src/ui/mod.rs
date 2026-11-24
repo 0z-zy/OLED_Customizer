@@ -44,6 +44,7 @@ enum UiCmd {
     SetPreview(String),
     SetStartup(bool),
     Elevate(String),
+    ReconnectGg,
 }
 
 pub struct OledApp {
@@ -99,6 +100,7 @@ impl OledApp {
                         Ok(UiCmd::SetPreview(t)) => client.set_preview(&t),
                         Ok(UiCmd::SetStartup(en)) => client.set_startup(en),
                         Ok(UiCmd::Elevate(args)) => client.elevate(&args),
+                        Ok(UiCmd::ReconnectGg) => client.reconnect_gg(),
                         Err(mpsc::RecvTimeoutError::Timeout) => {}
                         Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     }
@@ -326,6 +328,18 @@ impl eframe::App for OledApp {
                             .size(10.5)
                             .color(TEXT_DIM),
                         );
+                        ui.add_space(4.0);
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    RichText::new("Reconnect GG").size(10.5).color(TEXT_MAIN),
+                                )
+                                .min_size(vec2(ui.available_width(), 22.0)),
+                            )
+                            .clicked()
+                        {
+                            let _ = self.cmd_tx.send(UiCmd::ReconnectGg);
+                        }
                     });
                 });
             });

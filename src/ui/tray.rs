@@ -16,6 +16,7 @@ static APP_ICON_PNG: &[u8] = include_bytes!("../../assets/app_icon.png");
 #[derive(Clone)]
 pub struct TrayIds {
     pub id_open: MenuId,
+    pub id_reconnect_gg: MenuId,
     pub id_quit: MenuId,
     pub id_enabled: MenuId,
     pub id_hw_always: MenuId,
@@ -79,6 +80,7 @@ pub fn create_tray(cfg: &AppConfig) -> Result<TrayState, String> {
 
     let menu = Menu::new();
     let item_open = MenuItem::new("Open Settings & Live Preview", true, None);
+    let item_reconnect_gg = MenuItem::new("Reconnect SteelSeries GG", true, None);
     let item_enabled = CheckMenuItem::new("Enable OLED Output", true, cfg.enabled, None);
     let item_hw_always =
         CheckMenuItem::new("Always Show HW Monitor", true, cfg.display_hw_monitor, None);
@@ -117,6 +119,7 @@ pub fn create_tray(cfg: &AppConfig) -> Result<TrayState, String> {
     }
 
     let _ = menu.append(&item_open);
+    let _ = menu.append(&item_reconnect_gg);
     let _ = menu.append(&PredefinedMenuItem::separator());
     let _ = menu.append(&item_enabled);
     let _ = menu.append(&clock_sub);
@@ -137,6 +140,7 @@ pub fn create_tray(cfg: &AppConfig) -> Result<TrayState, String> {
 
     let ids = TrayIds {
         id_open: item_open.id().clone(),
+        id_reconnect_gg: item_reconnect_gg.id().clone(),
         id_quit: item_quit.id().clone(),
         id_enabled: item_enabled.id().clone(),
         id_hw_always: item_hw_always.id().clone(),

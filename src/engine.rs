@@ -79,6 +79,7 @@ pub struct EngineHandle {
     pub fps_monitor: Arc<FpsMonitor>,
     pub headset_hid: Arc<HeadsetHid>,
     pub audio_spectrum: Arc<AudioSpectrum>,
+    pub force_gg_reconnect: Arc<AtomicBool>,
     pub stop_flag: Arc<AtomicBool>,
     hw_polling_ms: Arc<AtomicU64>,
     show_fps: Arc<AtomicBool>,
@@ -117,6 +118,7 @@ impl EngineHandle {
         let headset_hid = Arc::new(HeadsetHid::new(audio_tx.clone()));
         headset_hid.set_enabled(initial_cfg.headset_hid_sync_enabled || initial_cfg.show_headset_battery);
         let audio_spectrum = Arc::new(AudioSpectrum::start());
+        let force_gg_reconnect = Arc::new(AtomicBool::new(false));
 
         start_hw_poller(
             hw_stats.clone(),
@@ -145,6 +147,7 @@ impl EngineHandle {
             fps_monitor,
             headset_hid: headset_hid.clone(),
             audio_spectrum: audio_spectrum.clone(),
+            force_gg_reconnect: force_gg_reconnect.clone(),
             stop_flag: stop_flag.clone(),
             hw_polling_ms,
             show_fps,
@@ -165,6 +168,7 @@ impl EngineHandle {
             hotkey_rx,
             audio_tx,
             broadcast_payload,
+            force_gg_reconnect,
             stop_flag,
         );
 
@@ -228,6 +232,7 @@ fn spawn_render_loop(
     hotkey_rx: Receiver<HotkeyAction>,
     audio_tx: std::sync::mpsc::Sender<AudioCommand>,
     broadcast_payload: Arc<RwLock<BroadcastPayload>>,
+    force_gg_reconnect: Arc<AtomicBool>,
     stop_flag: Arc<AtomicBool>,
 ) {
     thread::Builder::new()
@@ -248,6 +253,7 @@ fn spawn_render_loop(
             let mut cached_ram_mb = process_memory_mb();
             let mut last_track_sig = String::new();
             let mut last_pos_tick = Instant::now();
+            let mut prev_output_to_oled = false;
             let mut sub_tick: u32 = 0;
 
             while !stop_flag.load(Ordering::Relaxed) {
@@ -493,6 +499,12 @@ fn spawn_render_loop(
 
                 // 3. Push to SteelSeries GameSense if enabled & outputting
                 if cfg.enabled && cfg.output_to_oled {
+                    if force_gg_reconnect.swap(false, Ordering::Relaxed)
+                        || (!prev_output_to_oled && last_sent_frame.is_some())
+                    {
+                        ss_client.reconnect();
+                        last_sent_frame = None;
+                    }
                     let changed = last_sent_frame.as_ref() != Some(&canvas.data);
                     let keepalive = last_frame_sent_at.elapsed() >= Duration::from_secs(1);
                     if changed || keepalive {
@@ -514,6 +526,7 @@ fn spawn_render_loop(
                 } else {
                     ss_client.status = GgStatus::Paused;
                 }
+                prev_output_to_oled = cfg.output_to_oled;
 
                 if last_ram_check.elapsed() >= Duration::from_secs(1) {
                     last_ram_check = Instant::now();

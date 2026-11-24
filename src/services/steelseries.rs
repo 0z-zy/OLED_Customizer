@@ -39,8 +39,8 @@ pub struct SteelSeriesClient {
 impl SteelSeriesClient {
     pub fn new() -> Self {
         let agent = ureq::AgentBuilder::new()
-            .timeout_connect(Duration::from_millis(400))
-            .timeout_read(Duration::from_millis(800))
+            .timeout_connect(Duration::from_millis(800))
+            .timeout_read(Duration::from_millis(2500))
             .build();
         let mut client = Self {
             agent,
@@ -94,8 +94,16 @@ impl SteelSeriesClient {
         false
     }
 
+    pub fn reconnect(&mut self) -> bool {
+        self.address = None;
+        self.consecutive_errors = 0;
+        self.backoff_until = None;
+        self.try_connect()
+    }
+
     fn register_and_bind(&self) -> bool {
         let _ = self.post_json("/remove_game", json!({ "game": GAME }));
+        std::thread::sleep(Duration::from_millis(80));
         if !self.post_json(
             "/game_metadata",
             json!({
@@ -105,10 +113,11 @@ impl SteelSeriesClient {
                 "deinitialize_timer_length_ms": 60000
             }),
         ) {
+            log::warn!("SteelSeries /game_metadata registration failed");
             return false;
         }
         let dummy = vec![0u8; 640];
-        self.post_json(
+        let ok = self.post_json(
             "/bind_game_event",
             json!({
                 "game": GAME,
@@ -123,7 +132,11 @@ impl SteelSeriesClient {
                     }]
                 }]
             }),
-        )
+        );
+        if !ok {
+            log::warn!("SteelSeries /bind_game_event failed");
+        }
+        ok
     }
 
     fn post_json(&self, endpoint: &str, body: serde_json::Value) -> bool {
@@ -132,7 +145,13 @@ impl SteelSeriesClient {
         };
         let url = format!("{}{}", base, endpoint);
         match self.agent.post(&url).send_json(body) {
-            Ok(resp) => resp.status() == 200,
+            Ok(resp) => {
+                if resp.status() != 200 {
+                    return false;
+                }
+                let text = resp.into_string().unwrap_or_default();
+                !text.contains("\"error\"")
+            }
             Err(_) => false,
         }
     }

@@ -147,12 +147,14 @@ pub enum DaemonEvent {
     OpenUi,
     Quit,
     ConfigChanged,
+    ReconnectGg,
 }
 
 pub fn start_ipc_server(
     engine: Arc<EngineHandle>,
     daemon_tx: std::sync::mpsc::Sender<DaemonEvent>,
     stop_flag: Arc<AtomicBool>,
+    exe_mtime: u64,
 ) -> Option<u16> {
     let listener = TcpListener::bind("127.0.0.1:0").ok()?;
     let port = listener.local_addr().ok()?.port();
@@ -254,6 +256,21 @@ pub fn start_ipc_server(
                                         let _ = dtx.send(DaemonEvent::Quit);
                                     }
                                 });
+                            } else if method == "GET" && path == "/meta" {
+                                let json = serde_json::json!({
+                                    "version": env!("CARGO_PKG_VERSION"),
+                                    "exe_mtime": exe_mtime,
+                                })
+                                .to_string();
+                                let resp = format!(
+                                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                                    json.len(),
+                                    json
+                                );
+                                let _ = stream.write_all(resp.as_bytes());
+                            } else if method == "POST" && path == "/reconnect-gg" {
+                                let _ = daemon_tx.send(DaemonEvent::ReconnectGg);
+                                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok");
                             } else if method == "POST" && path == "/quit" {
                                 let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok");
                                 let _ = daemon_tx.send(DaemonEvent::Quit);
@@ -321,6 +338,26 @@ impl IpcClient {
     pub fn elevate(&self, args: &str) {
         let url = format!("{}/elevate", self.base);
         let _ = self.agent.post(&url).send_string(args);
+    }
+
+    pub fn reconnect_gg(&self) {
+        let url = format!("{}/reconnect-gg", self.base);
+        let _ = self.agent.post(&url).call();
+    }
+
+    pub fn get_meta(port: u16) -> Option<(String, u64)> {
+        let c = Self::new(port);
+        let url = format!("{}/meta", c.base);
+        let v: serde_json::Value = c.agent.get(&url).call().ok()?.into_json().ok()?;
+        let ver = v.get("version")?.as_str()?.to_string();
+        let mtime = v.get("exe_mtime")?.as_u64()?;
+        Some((ver, mtime))
+    }
+
+    pub fn request_quit(port: u16) -> bool {
+        let c = Self::new(port);
+        let url = format!("{}/quit", c.base);
+        c.agent.post(&url).call().is_ok()
     }
 
     pub fn wake_open_ui(port: u16) -> bool {

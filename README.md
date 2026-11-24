@@ -2,7 +2,7 @@
 
 **Lightweight native Rust dashboard for SteelSeries 128×40 OLED keyboards.**
 
-![Version](https://img.shields.io/badge/version-2.0.1-white?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-2.0.2-white?style=for-the-badge)
 ![Built with Rust](https://img.shields.io/badge/Rust-native-orange?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey?style=for-the-badge)

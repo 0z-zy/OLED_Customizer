@@ -1,6 +1,6 @@
 [package]
 name = "oled-customizer"
-version = "2.0.1"
+version = "2.0.2"
 edition = "2021"
 default-run = "oled-customizer"
 description = "OLED Customizer - Native dashboard for SteelSeries 128x40 OLED displays"

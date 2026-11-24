@@ -37,8 +37,22 @@ use services::steelseries::SteelSeriesClient;
 use ui::tray::{create_tray, load_window_icon_rgba, spawn_or_focus_ui, TrayState};
 use ui::OledApp;
 
+fn current_exe_mtime() -> u64 {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| std::fs::metadata(p).ok())
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 fn run_smoke_test() {
-    let cfg = AppConfig::load();
+    let mut cfg = AppConfig::load();
+    // Never disrupt a live SteelSeries GG registration or broadcast port during smoke test
+    cfg.output_to_oled = false;
+    cfg.smtc_broadcast_enabled = false;
+    cfg.signalrgb_push_enabled = false;
     let engine = EngineHandle::start(cfg);
     thread::sleep(Duration::from_millis(1600));
     trim_working_set();
@@ -174,7 +188,9 @@ fn main() {
     let start_minimized_arg = args.iter().any(|a| a == "--minimized");
     let setup_admin_task = args.iter().any(|a| a == "--setup-admin-task");
     let elevated_relaunch = setup_admin_task || args.iter().any(|a| a == "--elevated");
+    let restart_arg = args.iter().any(|a| a == "--restart");
     let no_elevate = args.iter().any(|a| a == "--no-elevate");
+    let exe_mtime = current_exe_mtime();
 
     let cfg = AppConfig::load();
     logging::init_logging(cfg.debug_enabled);
@@ -187,8 +203,9 @@ fn main() {
         }
     }
 
-    // Single-instance guard (CreateMutexW returns ERROR_ACCESS_DENIED when an Admin daemon owns it)
-    let mut attempts = if elevated_relaunch { 20 } else { 1 };
+    // Single-instance guard (supports Smart Replace when a newer/different exe is launched)
+    let mut attempts = if elevated_relaunch || restart_arg { 25 } else { 1 };
+    let mut replace_requested = false;
     let _mutex = loop {
         let acquired = unsafe {
             match CreateMutexW(None, false, w!("OLED_Customizer_Mutex")) {
@@ -205,6 +222,24 @@ fn main() {
         };
         if let Some(handle) = acquired {
             break handle;
+        }
+        if !elevated_relaunch && !replace_requested {
+            if let Some(p) = read_running_port() {
+                let is_different = restart_arg
+                    || IpcClient::get_meta(p)
+                        .map(|(ver, mtime)| ver != env!("CARGO_PKG_VERSION") || mtime != exe_mtime)
+                        .unwrap_or(false);
+                if is_different {
+                    replace_requested = true;
+                    attempts = 25;
+                    let _ = IpcClient::request_quit(p);
+                } else {
+                    let _ = IpcClient::wake_open_ui(p);
+                    return;
+                }
+            } else {
+                return;
+            }
         }
         attempts -= 1;
         if attempts == 0 {
@@ -240,7 +275,7 @@ fn main() {
     let stop_flag = Arc::new(AtomicBool::new(false));
     let engine = Arc::new(EngineHandle::start(cfg.clone()));
     let (daemon_tx, daemon_rx) = mpsc::channel::<DaemonEvent>();
-    let ipc_port = start_ipc_server(engine.clone(), daemon_tx, stop_flag.clone()).unwrap_or(0);
+    let ipc_port = start_ipc_server(engine.clone(), daemon_tx, stop_flag.clone(), exe_mtime).unwrap_or(0);
 
     let tray = create_tray(&cfg).ok();
 
@@ -279,6 +314,9 @@ fn main() {
                         sync_tray_checks(tr, &c, calc);
                     }
                 }
+                DaemonEvent::ReconnectGg => {
+                    engine.force_gg_reconnect.store(true, Ordering::Relaxed);
+                }
                 DaemonEvent::Quit => {
                     break 'daemon;
                 }
@@ -305,6 +343,8 @@ fn main() {
             if let Some(ref tr) = tray {
                 if ev.id == tr.ids.id_open {
                     open_requested = true;
+                } else if ev.id == tr.ids.id_reconnect_gg {
+                    engine.force_gg_reconnect.store(true, Ordering::Relaxed);
                 } else if ev.id == tr.ids.id_quit {
                     break 'daemon;
                 } else {
